@@ -1,4 +1,4 @@
-#RISC-V L-Trace Decoder
+# RISC-V L-Trace Decoder
 
 ## Running L-Trace Flow
 ```
