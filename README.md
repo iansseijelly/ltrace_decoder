@@ -11,7 +11,7 @@ L-trace is the **lean trace format** that is simple, efficient, and profiling-fr
 Comparing to other trace formats that focus on compression efficiency, it tries to capture all basic-block exits. 
 This includes taken and non-taken branches, inferable and uninferable jumps. 
 It will also be extended to support traps and OS-level events. 
-This provides rich information to profilers 
+This provides rich timing information to profilers while trying to be simple and efficient in encoding.  
 
 ## Why L-Trace?
 L-trace is motivated by the observation that both N-trace and E-trace significantly drops timestamps on certain control flow changes. 
