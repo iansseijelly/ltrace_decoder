@@ -138,10 +138,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_verbose(&format!("packet: {:?}", packet), args.verbose);
     let mut pc = refund_addr(packet.address);
     println!("pc: {:x}", pc);
+    decoded_trace_writer.write_all(format!("timestamp: {}\n", packet.timestamp).as_bytes())?;
+    let mut timestamp = packet.timestamp;
     while let Ok(packet) = packet::read_packet(&mut encoded_trace_reader) {
         // special handling for the last packet, should be unlikely hinted
+        print_verbose(&format!("packet: {:?}", packet), args.verbose);
         if packet.f_header == FHeader::FSync {
             pc = step_bb_until(pc, &insn_map, refund_addr(packet.address), &mut decoded_trace_writer);
+            println!("detected FSync packet, trace ending!");
             break;
         }
         pc = step_bb(pc, &insn_map, &mut decoded_trace_writer);
@@ -170,6 +174,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 panic!("unknown FHeader: {:?}", packet.f_header);
             }
         }
+        // log the timestamp
+        timestamp += packet.timestamp;
+        decoded_trace_writer.write_all(format!("timestamp: {}\n", timestamp).as_bytes())?;
     }
     Ok(())
 }

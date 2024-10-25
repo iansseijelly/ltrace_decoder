@@ -73,6 +73,7 @@ impl From<CHeader> for FHeader {
 
 #[derive(Debug)]
 pub struct Packet {
+    pub is_compressed: bool,
     pub c_header: CHeader,
     pub f_header: FHeader,
     pub address: u64,
@@ -83,6 +84,7 @@ pub struct Packet {
 impl Packet {
     fn new() -> Packet {
         Packet {
+            is_compressed: false,
             c_header: CHeader::CNa,
             f_header: FHeader::FRes,
             address: 0,
@@ -110,15 +112,17 @@ fn read_varint(stream: &mut BufReader<File>) -> Result<u64, Box<dyn std::error::
 pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::error::Error>> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
-    // println!("first_byte: {:08b}", first_byte);
+    println!("first_byte: {:08b}", first_byte);
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
     match c_header {
         CHeader::CTb | CHeader::CNt | CHeader::CIj => {
-            packet.timestamp = (first_byte & C_TIMESTAMP_MASK) as u64;
+            packet.timestamp = (first_byte & C_TIMESTAMP_MASK) as u64 >> 2;
             packet.f_header = FHeader::from(c_header.clone());
             packet.c_header = c_header.clone();
+            packet.is_compressed = true;
         }
         CHeader::CNa => {
+            packet.is_compressed = false;
             let f_header = FHeader::from((first_byte & F_HEADER_MASK) >> FHEADER_OFFSET);
             // println!("f_header: {:?}", f_header);
             match f_header {
