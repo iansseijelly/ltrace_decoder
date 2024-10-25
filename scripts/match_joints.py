@@ -1,3 +1,6 @@
+# A joint is where spike model decides to produce a packet
+# This script matches the joints from the spike trace to the decoder dump
+
 import argparse
 import re
 
