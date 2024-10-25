@@ -1,4 +1,5 @@
 # Parse the spike trace and the decoder dump to find any divergence
+
 import argparse
 
 def read_reference_file(reference_file):
