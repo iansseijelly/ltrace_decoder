@@ -146,6 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if packet.f_header == FHeader::FSync {
             pc = step_bb_until(pc, &insn_map, refund_addr(packet.address), &mut decoded_trace_writer);
             println!("detected FSync packet, trace ending!");
+            decoded_trace_writer.write_all(format!("timestamp: {}\n", packet.timestamp).as_bytes())?;
             break;
         }
         pc = step_bb(pc, &insn_map, &mut decoded_trace_writer);
