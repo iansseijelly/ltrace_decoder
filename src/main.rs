@@ -85,7 +85,9 @@ fn step_bb_until(pc: u64, insn_map: &HashMap<u64, &Insn>, target_pc: u64, decode
         decoded_trace_writer.write_all(format!("{}", insn).as_bytes()).expect("failed to write to decoded trace file");
         decoded_trace_writer.write_all(b"\n").expect("failed to write to decoded trace file");
         if BRANCH_OPCODES.contains(&insn.mnemonic().unwrap()) || JUMP_OPCODES.contains(&insn.mnemonic().unwrap()) {
-            panic!("unexpected branch/jump when handling FSync packet at pc: {}", pc);
+            if pc != target_pc {
+                panic!("unexpected branch/jump when handling FSync packet at pc: {}", pc);
+            }
         }
         pc += insn.len() as u64;
         if pc == target_pc {
@@ -169,7 +171,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             FHeader::FUj => {
                 assert!(JUMP_OPCODES.contains(&insn_to_resolve.mnemonic().unwrap()));
-                pc = refund_addr(packet.address ^ pc >> 1);
+                pc = refund_addr(packet.address ^ (pc >> 1));
+            }
+            FHeader::FTrap => {
+                decoded_trace_writer.write_all(format!("[TRAP] trap type: {:?}\n", packet.trap_type).as_bytes())?;
+                pc = refund_addr(packet.address ^ (pc >> 1));
             }
             _ => {
                 panic!("unknown FHeader: {:?}", packet.f_header);

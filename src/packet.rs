@@ -5,6 +5,8 @@ const C_HEADER_MASK: u8 = 0b0000_0011;
 const C_TIMESTAMP_MASK: u8 = 0b1111_1100;
 const F_HEADER_MASK: u8 = 0b0001_1100;
 const FHEADER_OFFSET: u8 = 2;
+const TRAP_TYPE_MASK: u8 = 0b1110_0000;
+const TRAP_TYPE_OFFSET: u8 = 5;
 
 const VAR_MASK: u8 = 0b1000_0000;
 const VAR_CONT: u8 = 0b0000_0000;
@@ -38,7 +40,7 @@ pub enum FHeader {
     FNt = 0b001,   // non taken branch
     FUj = 0b010,   // uninferable jump
     FIj = 0b011,   // inferable jump
-    FTr = 0b100, // trapping happened - could be interrupt or exception
+    FTrap = 0b100, // trapping happened - could be interrupt or exception
     FSync = 0b101, // a synchronization packet
     FVal = 0b110,   // this packets report a certain value upon request
     FRes = 0b111,   // reserved for now
@@ -51,7 +53,7 @@ impl From<u8> for FHeader {
             0b001 => FHeader::FNt,
             0b010 => FHeader::FUj,
             0b011 => FHeader::FIj,
-            0b100 => FHeader::FTr,
+            0b100 => FHeader::FTrap,
             0b101 => FHeader::FSync,
             0b110 => FHeader::FVal,
             0b111 => FHeader::FRes,
@@ -72,10 +74,31 @@ impl From<CHeader> for FHeader {
 }
 
 #[derive(Debug)]
+pub enum TrapType {
+    TNone      = 0b000,
+    TException = 0b001,
+    TInterrupt = 0b010,
+    TReturn    = 0b100,
+}
+
+impl From<u8> for TrapType {
+    fn from(value: u8) -> Self {
+        match value {
+            0b000 => TrapType::TNone,
+            0b001 => TrapType::TException,
+            0b010 => TrapType::TInterrupt,
+            0b100 => TrapType::TReturn,
+            _ => panic!("Invalid TrapType value"),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Packet {
     pub is_compressed: bool,
     pub c_header: CHeader,
     pub f_header: FHeader,
+    pub trap_type: TrapType,
     pub address: u64,
     pub timestamp: u64,
 }
@@ -87,6 +110,7 @@ impl Packet {
             is_compressed: false,
             c_header: CHeader::CNa,
             f_header: FHeader::FRes,
+            trap_type: TrapType::TNone,
             address: 0,
             timestamp: 0,
         }
@@ -141,6 +165,16 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet, Box<dyn std::
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FSync => {
+                    let address = read_varint(stream)?;
+                    packet.address = address;
+                    let timestamp = read_varint(stream)?;
+                    packet.timestamp = timestamp;
+                    packet.f_header = f_header;
+                    packet.c_header = CHeader::CNa;
+                }
+                FHeader::FTrap => {
+                    let trap_type = TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
+                    packet.trap_type = trap_type;
                     let address = read_varint(stream)?;
                     packet.address = address;
                     let timestamp = read_varint(stream)?;
