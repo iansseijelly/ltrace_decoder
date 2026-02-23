@@ -82,6 +82,7 @@ impl AbstractReceiver for CycEmulationReceiver {
                         self.event_staging.push(kind.clone());
                     }
                 }
+
                 if self.n_tnt >= self.lim_tnt || matches!(&kind, EventKind::UninferableJump { .. })
                 {
                     // smear the timestamps distributing across all events staged, excluding the current event
@@ -97,10 +98,12 @@ impl AbstractReceiver for CycEmulationReceiver {
                             .unwrap();
                         self.writer.write_all(b"\n").unwrap();
                     }
-                    // clear the staged events
+
+                    // clear the states
                     self.event_staging.clear();
                     self.n_tnt = 0;
-                    // update the current TC
+
+                    // update the current cycle
                     self.curr_cyc = timestamp;
                 }
             }

@@ -13,7 +13,7 @@
     "tc_emulation": {
       "enabled": true,
       "path": "trace.trace_hello.tc_emulation.txt",
-      "interval": 100
+      "interval": 1000
     },
     "cyc_emulation": {
       "enabled": true,

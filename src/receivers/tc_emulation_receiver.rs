@@ -67,6 +67,7 @@ impl AbstractReceiver for TcEmulationReceiver {
             } => {
                 self.curr_tc = timestamp / self.interval;
             }
+
             Entry::Event { timestamp, kind } => {
                 if timestamp / self.interval != self.curr_tc {
                     // smear the timestamps distributing across all events staged, excluding the current event
@@ -83,8 +84,10 @@ impl AbstractReceiver for TcEmulationReceiver {
                             .unwrap();
                         self.writer.write_all(b"\n").unwrap();
                     }
+                    
                     // clear the staged events
                     self.event_staging.clear();
+                    
                     // update the current TC
                     self.curr_tc = next_tc;
                 }
