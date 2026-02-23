@@ -6,6 +6,19 @@
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],
   "receivers": {
-    "txt": { "enabled": true, "path": "trace.trace_hello.txt" }
+    "txt_delta": {
+      "enabled": true,
+      "path": "trace.trace_hello.txt_delta.txt"
+    },
+    "tc_emulation": {
+      "enabled": true,
+      "path": "trace.trace_hello.tc_emulation.txt",
+      "interval": 100
+    },
+    "cyc_emulation": {
+      "enabled": true,
+      "path": "trace.trace_hello.cyc_emulation.txt",
+      "lim_tnt": 47
+    }
   }
 }
