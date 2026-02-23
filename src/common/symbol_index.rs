@@ -90,8 +90,15 @@ pub fn build_single_symbol_index(
     let elf_data = fs::read(&elf_path)?;
     let obj_file = object::File::parse(&*elf_data)?;
     debug!("elf_path: {}", elf_path);
-    let loader = Loader::new(&elf_path)
-        .map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
+    let loader = match Loader::new(&elf_path) {
+        Ok(loader) => Some(loader),
+        Err(e) => {
+            // Some DWARF encodings (e.g., newer range list formats) can trip up
+            // addr2line/gimli. We still want symbols, just without source info.
+            warn!("DWARF loader error for {}: {}", elf_path, e);
+            None
+        }
+    };
 
     // Gather indices of all executable sections
     let exec_secs: std::collections::HashSet<_> = obj_file
@@ -116,7 +123,7 @@ pub fn build_single_symbol_index(
                     if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L") {
                         let addr = symbol.address();
                         // lookup source location (may return None)
-                        let loc = loader.find_location(addr);
+                        let loc = loader.as_ref().map(|l| l.find_location(addr));
                         let mut info: SymbolInfo = SymbolInfo {
                             name: name.to_string(),
                             src: SourceLocation {
@@ -126,9 +133,11 @@ pub fn build_single_symbol_index(
                             },
                             prv: prv,
                         };
-                        if let Ok(Some(loc)) = loc {
-                            let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
-                            info.src = src;
+                        if let Some(loc) = loc {
+                            if let Ok(Some(loc)) = loc {
+                                let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
+                                info.src = src;
+                            }
                         }
                         // dedupe aliases: prefer non‑empty over empty
                         if let Some(existing) = func_symbol_map.get_mut(&addr) {
