@@ -8,6 +8,7 @@ pub mod speedscope_receiver;
 pub mod stack_txt_receiver;
 pub mod bb_stats_receiver;
 pub mod path_profile_receiver;
+pub mod tc_emulation_receiver;
 
 // TODO: mask off for now until verified again
 // pub mod afdo_receiver;
