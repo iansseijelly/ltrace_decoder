@@ -5,8 +5,8 @@ extern crate gcno_reader;
 extern crate indicatif;
 extern crate log;
 extern crate object;
-extern crate rvdasm;
 extern crate rustc_data_structures;
+extern crate rvdasm;
 
 mod frontend {
     pub mod bp_double_saturating_counter;
@@ -43,8 +43,8 @@ use std::io::{BufReader, Read};
 use clap::Parser;
 use object::Object;
 // path dependency
-use std::path::Path;
 use std::io::Write;
+use std::path::Path;
 // bus dependency
 use bus::Bus;
 use std::thread;
@@ -175,7 +175,8 @@ fn main() -> Result<()> {
     let receiver_cfg = static_cfg.receivers.clone();
 
     if !receiver_cfg.is_empty() {
-        let shared = receivers::abstract_receiver::Shared::new(&static_cfg.clone(), &runtime_cfg.clone())?;
+        let shared =
+            receivers::abstract_receiver::Shared::new(&static_cfg.clone(), &runtime_cfg.clone())?;
 
         for (name, cfg) in receiver_cfg.iter() {
             let enabled = cfg
@@ -186,8 +187,7 @@ fn main() -> Result<()> {
                 continue;
             }
             let bus_rx = bus.add_rx();
-            let receiver =
-                registry::make_receiver(name, &shared, cfg.clone(), bus_rx)?;
+            let receiver = registry::make_receiver(name, &shared, cfg.clone(), bus_rx)?;
             receivers.push(receiver);
         }
     }

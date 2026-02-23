@@ -1,6 +1,6 @@
-use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
 use crate::common::prv::Prv;
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 
 use bus::BusReader;
 use std::collections::HashMap;
@@ -22,11 +22,16 @@ pub struct BBStatsReceiver {
     prev_timestamp: u64,
     asid_of_interest: Vec<u64>,
     prv_of_interest: Vec<Prv>,
-    interested: bool
+    interested: bool,
 }
 
 impl BBStatsReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, path: String, asid_of_interest: Vec<u64>, prv_of_interest: Vec<Prv>) -> Self {
+    pub fn new(
+        bus_rx: BusReader<Entry>,
+        path: String,
+        asid_of_interest: Vec<u64>,
+        prv_of_interest: Vec<Prv>,
+    ) -> Self {
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
@@ -49,19 +54,46 @@ pub fn factory(
     _config: serde_json::Value,
     bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
-    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.bb_stats.csv").to_string();
-    let asid_of_interest = _config.get("asid_of_interest").and_then(|value| value.as_array()).unwrap_or(&vec![]).iter().map(|value| value.as_u64().unwrap()).collect();
+    let path = _config
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or("trace.bb_stats.csv")
+        .to_string();
+    let asid_of_interest = _config
+        .get("asid_of_interest")
+        .and_then(|value| value.as_array())
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|value| value.as_u64().unwrap())
+        .collect();
     let mut prv_of_interest = vec![];
-    if _config.get("do_user").and_then(|value| value.as_bool()).unwrap_or(false) {
+    if _config
+        .get("do_user")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
         prv_of_interest.push(Prv::PrvUser);
     }
-    if _config.get("do_supervisor").and_then(|value| value.as_bool()).unwrap_or(false) {
+    if _config
+        .get("do_supervisor")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
         prv_of_interest.push(Prv::PrvSupervisor);
     }
-    if _config.get("do_machine").and_then(|value| value.as_bool()).unwrap_or(false) {
+    if _config
+        .get("do_machine")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
         prv_of_interest.push(Prv::PrvMachine);
     }
-    Box::new(BBStatsReceiver::new(bus_rx, path, asid_of_interest, prv_of_interest))
+    Box::new(BBStatsReceiver::new(
+        bus_rx,
+        path,
+        asid_of_interest,
+        prv_of_interest,
+    ))
 }
 
 crate::register_receiver!("bb_stats", factory);
@@ -136,7 +168,13 @@ impl AbstractReceiver for BBStatsReceiver {
             }
             Entry::Event {
                 timestamp,
-                kind: EventKind::Trap { reason: _, prv_arc, arc, ctx },
+                kind:
+                    EventKind::Trap {
+                        reason: _,
+                        prv_arc,
+                        arc,
+                        ctx,
+                    },
             } => {
                 if self.prv_of_interest.contains(&prv_arc.1) {
                     if prv_arc.1 == Prv::PrvUser {
@@ -174,11 +212,7 @@ impl AbstractReceiver for BBStatsReceiver {
                 .write_all(
                     format!(
                         "{}, {}, {}, {:#x}-{:#x}\n",
-                        count,
-                        mean,
-                        netvar,
-                        bb.start_addr,
-                        bb.end_addr,
+                        count, mean, netvar, bb.start_addr, bb.end_addr,
                     )
                     .as_bytes(),
                 )

@@ -1,7 +1,7 @@
-use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
-use crate::receivers::stack_unwinder::StackUnwinder;
 use crate::common::symbol_index::SymbolIndex;
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
+use crate::receivers::stack_unwinder::StackUnwinder;
 use bus::BusReader;
 use std::collections::HashMap;
 use std::fs::File;
@@ -23,7 +23,11 @@ pub struct PathStats {
 
 impl PathStats {
     pub fn new(duration: u64) -> Self {
-        Self { count: 1, min: duration, sum: duration }
+        Self {
+            count: 1,
+            min: duration,
+            sum: duration,
+        }
     }
 
     pub fn update(&mut self, duration: u64) {
@@ -56,13 +60,8 @@ pub struct PathProfileReceiver {
 }
 
 impl PathProfileReceiver {
-    pub fn new(
-        bus_rx: BusReader<Entry>,
-        symbols: Arc<SymbolIndex>,
-        path: String,
-    ) -> Self {
-        let unwinder =
-            StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
+    pub fn new(bus_rx: BusReader<Entry>, symbols: Arc<SymbolIndex>, path: String) -> Self {
+        let unwinder = StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
             receiver: BusReceiver {
@@ -83,8 +82,16 @@ pub fn factory(
     _config: serde_json::Value,
     bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
-    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.path_profile.csv").to_string();
-    Box::new(PathProfileReceiver::new(bus_rx, _shared.symbol_index.clone(), path))
+    let path = _config
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or("trace.path_profile.csv")
+        .to_string();
+    Box::new(PathProfileReceiver::new(
+        bus_rx,
+        _shared.symbol_index.clone(),
+        path,
+    ))
 }
 crate::register_receiver!("path_profile", factory);
 
@@ -167,12 +174,23 @@ impl AbstractReceiver for PathProfileReceiver {
 
     fn _flush(&mut self) {
         // path net variation time(i)= total path execution time(i)–(path frequency(i) x (path basetime(i)))
-        self.writer.write_all(format!("count,mean,netvar,path\n").as_bytes()).unwrap();
+        self.writer
+            .write_all(format!("count,mean,netvar,path\n").as_bytes())
+            .unwrap();
         for (path, records) in self.path_records.iter() {
             // compute mean and standard deviation
             let net_var = records.sum as f64 - (records.count as f64 * records.min as f64);
             self.writer
-                .write_all(format!("{}, {}, {}, {}\n", records.count, records.sum as f64 / records.count as f64, net_var, path.to_string()).as_bytes())
+                .write_all(
+                    format!(
+                        "{}, {}, {}, {}\n",
+                        records.count,
+                        records.sum as f64 / records.count as f64,
+                        net_var,
+                        path.to_string()
+                    )
+                    .as_bytes(),
+                )
                 .unwrap();
         }
         self.writer.flush().unwrap();

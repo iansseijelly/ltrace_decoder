@@ -71,7 +71,11 @@ pub struct PacketReader {
 
 impl PacketReader {
     pub fn new(stream: BufReader<File>) -> Self {
-        Self { stream, compressed_packet_count: 0, full_packet_count: 0 }
+        Self {
+            stream,
+            compressed_packet_count: 0,
+            full_packet_count: 0,
+        }
     }
 
     pub fn read_packet(&mut self, packet: &mut Packet) -> Result<(u64)> {
@@ -168,9 +172,7 @@ impl PacketReader {
         }
         Ok(bytes_read)
     }
-    
 }
-
 
 fn read_varint(stream: &mut BufReader<File>) -> Result<(u64, u64)> {
     let mut scratch = [0u8; 10];
@@ -206,13 +208,12 @@ fn read_prv(stream: &mut BufReader<File>) -> Result<(Prv, Prv)> {
 
 // returns the number of bytes read
 
-
 pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<(Packet, DecoderRuntimeCfg)> {
     let mut packet = Packet::new();
     let first_byte = read_u8(stream)?;
     trace!("first_byte: {:08b}", first_byte);
     let mut bytes_read = 1;
-    
+
     let c_header = CHeader::from(first_byte & C_HEADER_MASK);
     if c_header != CHeader::CNa {
         return Err(anyhow::anyhow!(

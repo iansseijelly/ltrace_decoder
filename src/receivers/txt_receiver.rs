@@ -1,5 +1,5 @@
-use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::{Entry, EventKind};
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -28,7 +28,11 @@ pub fn factory(
     _config: serde_json::Value,
     bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
-    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.txt").to_string();
+    let path = _config
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or("trace.txt")
+        .to_string();
     Box::new(TxtReceiver::new(bus_rx, path))
 }
 

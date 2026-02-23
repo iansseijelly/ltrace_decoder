@@ -31,9 +31,7 @@ pub struct StackUpdateResult {
 }
 
 impl StackUnwinder {
-    pub fn new(
-        func_symbol_map: Arc<SymbolIndex>,
-    ) -> Result<Self> {
+    pub fn new(func_symbol_map: Arc<SymbolIndex>) -> Result<Self> {
         Ok(Self {
             func_symbol_map: func_symbol_map,
             frame_stack: Vec::new(),
@@ -176,7 +174,10 @@ impl StackUnwinder {
                         frames_closed: Vec::new(),
                     });
                 } else {
-                    panic!("failed to push frame for exception or interrupt, got target 0x{:08x}", to_addr);
+                    panic!(
+                        "failed to push frame for exception or interrupt, got target 0x{:08x}",
+                        to_addr
+                    );
                 }
             }
             TrapReason::Return => {

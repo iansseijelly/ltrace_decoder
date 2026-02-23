@@ -4,12 +4,12 @@ use anyhow::Result;
 use log::{debug, trace};
 use object::elf::SHF_EXECINSTR;
 use object::{Object, ObjectSection};
+use rustc_data_structures::fx::FxHashMap;
 use rvdasm::disassembler::*;
 use rvdasm::insn::Insn;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-use rustc_data_structures::fx::FxHashMap;
 
 pub struct InstructionIndex {
     asid_to_binary_id_map: HashMap<u64, usize>,

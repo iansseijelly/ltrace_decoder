@@ -3,9 +3,11 @@ use crate::receivers::abstract_receiver::{AbstractReceiver, Shared};
 use anyhow::Result;
 use bus::BusReader;
 
-pub type ReceiverFactory =
-    fn(shared: &Shared, config: serde_json::Value, bus_rx: BusReader<Entry>)
-        -> Box<dyn AbstractReceiver>;
+pub type ReceiverFactory = fn(
+    shared: &Shared,
+    config: serde_json::Value,
+    bus_rx: BusReader<Entry>,
+) -> Box<dyn AbstractReceiver>;
 
 pub struct ReceiverRegistration {
     pub name: &'static str,

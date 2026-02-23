@@ -12,7 +12,9 @@ pub struct DecoderCache {
 
 impl DecoderCache {
     pub fn new() -> Self {
-        Self { cache: FxHashMap::default() }
+        Self {
+            cache: FxHashMap::default(),
+        }
     }
 
     pub fn get(&self, pc: u64) -> Option<&BasicBlockStats> {

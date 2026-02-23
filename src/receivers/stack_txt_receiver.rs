@@ -1,7 +1,7 @@
-use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
 use crate::backend::event::Entry;
-use crate::receivers::stack_unwinder::{StackUnwinder, StackUpdateResult};
 use crate::common::symbol_index::SymbolIndex;
+use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
+use crate::receivers::stack_unwinder::{StackUnwinder, StackUpdateResult};
 use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -14,11 +14,7 @@ pub struct StackTxtReceiver {
 }
 
 impl StackTxtReceiver {
-    pub fn new(
-        bus_rx: BusReader<Entry>,
-        symbols: Arc<SymbolIndex>,
-        path: String,
-    ) -> Self {
+    pub fn new(bus_rx: BusReader<Entry>, symbols: Arc<SymbolIndex>, path: String) -> Self {
         let unwinder = StackUnwinder::new(symbols).expect("init unwinder");
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
@@ -37,8 +33,16 @@ pub fn factory(
     _config: serde_json::Value,
     bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
-    let path = _config.get("path").and_then(|value| value.as_str()).unwrap_or("trace.stack.txt").to_string();
-    Box::new(StackTxtReceiver::new(bus_rx, Arc::clone(&_shared.symbol_index), path))
+    let path = _config
+        .get("path")
+        .and_then(|value| value.as_str())
+        .unwrap_or("trace.stack.txt")
+        .to_string();
+    Box::new(StackTxtReceiver::new(
+        bus_rx,
+        Arc::clone(&_shared.symbol_index),
+        path,
+    ))
 }
 crate::register_receiver!("stack_txt", factory);
 

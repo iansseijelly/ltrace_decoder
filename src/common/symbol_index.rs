@@ -120,7 +120,8 @@ pub fn build_single_symbol_index(
             if exec_secs.contains(&sec_idx) {
                 if let Ok(name) = symbol.name() {
                     // filter out ghost symbols
-                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L") {
+                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L")
+                    {
                         let addr = symbol.address();
                         // lookup source location (may return None)
                         let loc = loader.as_ref().map(|l| l.find_location(addr));
@@ -183,10 +184,8 @@ pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
         debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         for (binary, entry) in cfg.driver_binary_entry_tuples {
             let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-            let func_symbol_map = build_single_symbol_index(
-                binary.clone(),
-                Prv::PrvSupervisor,
-                driver_entry_point)?;
+            let func_symbol_map =
+                build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point)?;
             k_func_symbol_map.extend(func_symbol_map);
             debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         }
