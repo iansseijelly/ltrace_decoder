@@ -91,7 +91,7 @@ impl AbstractReceiver for CycEmulationReceiver {
                     let delta_cyc = slack / num_events;
                     for event in self.event_staging.iter() {
                         self.writer
-                            .write_all(format!("[timestamp delta: {}]", delta_cyc).as_bytes())
+                            .write_all(format!("[delta: {}]", delta_cyc).as_bytes())
                             .unwrap();
                         self.writer
                             .write_all(format!(" {}", event).as_bytes())

@@ -77,7 +77,7 @@ impl AbstractReceiver for TcEmulationReceiver {
                     let delta_tc = slack / num_events;
                     for event in self.event_staging.iter() {
                         self.writer
-                            .write_all(format!("[timestamp delta: {}]", delta_tc).as_bytes())
+                            .write_all(format!("[delta: {}]", delta_tc).as_bytes())
                             .unwrap();
                         self.writer
                             .write_all(format!(" {}", event).as_bytes())

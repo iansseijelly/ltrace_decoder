@@ -51,6 +51,12 @@ impl AbstractReceiver for TxtDeltaReceiver {
 
     fn _receive_entry(&mut self, entry: Entry) {
         match entry {
+            Entry::Event {
+                timestamp,
+                kind: EventKind::SyncStart { .. },
+            } => {
+                self.curr_timestamp = timestamp;
+            }
             Entry::Event { timestamp, kind } => {
                 self.writer
                     .write_all(format!("[delta: {}]", timestamp - self.curr_timestamp).as_bytes())
