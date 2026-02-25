@@ -13,8 +13,10 @@ pub struct TxtDeltaReceiver {
 /* Receiver for dumping the trace to a text file */
 impl TxtDeltaReceiver {
     pub fn new(bus_rx: BusReader<Entry>, path: String) -> Self {
+        let mut writer = BufWriter::new(File::create(path).unwrap());
+        writer.write_all(b"delta,event,from,to\n").unwrap();
         Self {
-            writer: BufWriter::new(File::create(path).unwrap()),
+            writer: writer,
             receiver: BusReceiver {
                 name: "txt".to_string(),
                 bus_rx: bus_rx,
@@ -33,7 +35,7 @@ pub fn factory(
     let path = _config
         .get("path")
         .and_then(|value| value.as_str())
-        .unwrap_or("trace.txt_delta.txt")
+        .unwrap_or("trace.tacit_delta.csv")
         .to_string();
     Box::new(TxtDeltaReceiver::new(bus_rx, path))
 }
@@ -59,12 +61,12 @@ impl AbstractReceiver for TxtDeltaReceiver {
             }
             Entry::Event { timestamp, kind } => {
                 self.writer
-                    .write_all(format!("[delta: {}]", timestamp - self.curr_timestamp).as_bytes())
+                    .write_all(format!("{},{}", timestamp - self.curr_timestamp, kind.to_csv_string()).as_bytes())
                     .unwrap();
                 // write the event
-                self.writer
-                    .write_all(format!(" {}", kind).as_bytes())
-                    .unwrap();
+                // self.writer
+                //     .write_all(format!(" {}", kind).as_bytes())
+                //     .unwrap();
                 self.writer.write_all(b"\n").unwrap();
                 self.curr_timestamp = timestamp;
             }

@@ -10,14 +10,14 @@
       "enabled": true,
       "path": "trace.trace_hello.txt_delta.txt"
     },
-    "tc_emulation": {
+    "tc_bb_emulation": {
       "enabled": true,
-      "path": "trace.trace_hello.tc_emulation.txt",
+      "path": "trace.trace_hello.tc_bb_emulation.txt",
       "interval": 1000
     },
-    "cyc_emulation": {
+    "cyc_bb_emulation": {
       "enabled": true,
-      "path": "trace.trace_hello.cyc_emulation.txt",
+      "path": "trace.trace_hello.cyc_bb_emulation.txt",
       "lim_tnt": 47
     }
   }

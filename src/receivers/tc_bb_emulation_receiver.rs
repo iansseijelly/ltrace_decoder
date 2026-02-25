@@ -4,7 +4,7 @@ use bus::BusReader;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-pub struct TcEmulationReceiver {
+pub struct TcBBEmulationReceiver {
     writer: BufWriter<File>,
     receiver: BusReceiver,
     curr_tc: u64,
@@ -15,10 +15,12 @@ pub struct TcEmulationReceiver {
 /* Emulates the behavior of a TC-based encoder, used for accuracy analysis
   A TC-based encoder encodes timestamp as separate packets emitted in fixed intervals.
 */
-impl TcEmulationReceiver {
+impl TcBBEmulationReceiver {
     pub fn new(bus_rx: BusReader<Entry>, path: String, interval: u64) -> Self {
+        let mut writer = BufWriter::new(File::create(path).unwrap());
+        writer.write_all(b"delta,event,from,to\n").unwrap();
         Self {
-            writer: BufWriter::new(File::create(path).unwrap()),
+            writer: writer,
             receiver: BusReceiver {
                 name: "tc_emulation".to_string(),
                 bus_rx: bus_rx,
@@ -39,18 +41,18 @@ pub fn factory(
     let path = _config
         .get("path")
         .and_then(|value| value.as_str())
-        .unwrap_or("trace.tc_emulation.txt")
+        .unwrap_or("trace.tc_bb_emulation.csv")
         .to_string();
     let interval = _config
         .get("interval")
         .and_then(|value| value.as_u64())
         .unwrap_or(1000000);
-    Box::new(TcEmulationReceiver::new(bus_rx, path, interval))
+    Box::new(TcBBEmulationReceiver::new(bus_rx, path, interval))
 }
 
-crate::register_receiver!("tc_emulation", factory);
+crate::register_receiver!("tc_bb_emulation", factory);
 
-impl AbstractReceiver for TcEmulationReceiver {
+impl AbstractReceiver for TcBBEmulationReceiver {
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {
         &mut self.receiver.bus_rx
     }
@@ -75,21 +77,28 @@ impl AbstractReceiver for TcEmulationReceiver {
                     let slack = (next_tc - self.curr_tc) * self.interval;
                     let num_events = self.event_staging.len() as u64;
                     let delta_tc = slack / num_events;
-                    for event in self.event_staging.iter() {
-                        self.writer
-                            .write_all(format!("[delta: {}]", delta_tc).as_bytes())
-                            .unwrap();
-                        self.writer
-                            .write_all(format!(" {}", event).as_bytes())
-                            .unwrap();
-                        self.writer.write_all(b"\n").unwrap();
-                    }
-                    
-                    // clear the staged events
-                    self.event_staging.clear();
-                    
-                    // update the current TC
+
                     self.curr_tc = next_tc;
+
+                    if num_events > 0 {
+                        // the last events gets the remainder as well
+                        let last_event = self.event_staging.pop().unwrap();
+
+                        // write the remaining events
+                        for event in self.event_staging.iter() {
+                            self.writer
+                                .write_all(format!("{},{}\n", delta_tc, event.to_csv_string()).as_bytes())
+                                .unwrap();
+                        }
+
+                        // write the last event
+                        self.writer
+                        .write_all(format!("{},{}\n", delta_tc + slack % num_events, last_event.to_csv_string()).as_bytes())
+                        .unwrap();
+                    
+                        // clear the staged events
+                        self.event_staging.clear();
+                    }
                 }
                 self.event_staging.push(kind);
             }
