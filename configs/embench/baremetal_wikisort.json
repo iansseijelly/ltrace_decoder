@@ -6,9 +6,13 @@
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],
   "receivers": {
-    "txt_delta": {
+    "reference_bb": {
       "enabled": true,
-      "path": "trace.trace_wikisort.txt_delta.csv"
+      "path": "trace.trace_wikisort.reference_bb.csv"
+    },
+    "reference_func": {
+      "enabled": true,
+      "path": "trace.trace_wikisort.reference_func.csv"
     },
     "tc_bb_emulation": {
       "enabled": true,
@@ -18,7 +22,12 @@
     "cyc_bb_emulation": {
       "enabled": true,
       "path": "trace.trace_wikisort.cyc_bb_emulation.csv",
-      "lim_tnt": 47
+      "lim_tnt": 6
+    },
+    "cyc_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_wikisort.cyc_func_emulation.csv",
+      "lim_tnt": 6
     }
   }
 }
