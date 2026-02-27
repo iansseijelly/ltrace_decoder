@@ -7,27 +7,31 @@
   "driver_binary_entry_tuples": [],
   "receivers": {
     "reference_bb": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_wikisort.reference_bb.csv"
     },
     "reference_func": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_wikisort.reference_func.csv"
     },
     "tc_bb_emulation": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_wikisort.tc_bb_emulation.csv",
       "interval": 1000
     },
     "cyc_bb_emulation": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_wikisort.cyc_bb_emulation.csv",
       "lim_tnt": 6
     },
     "cyc_func_emulation": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_wikisort.cyc_func_emulation.csv",
       "lim_tnt": 6
+    },
+    "speedscope": {
+      "enabled": true,
+      "path": "trace.trace_wikisort.speedscope.json"
     }
   }
 }

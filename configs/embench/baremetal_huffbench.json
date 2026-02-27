@@ -1,9 +1,37 @@
 {
-  "encoded_trace": "../../sims/vcs/trace_monitor_rockettile_0.encoded.trace",
+  "encoded_trace": "../../sims/vcs/trace_monitor_boom_tile_0.encoded.trace",
   "user_binaries": [],
   "machine_binary": "../baremetal-ide/build/examples/embench/huffbench.elf",
   "kernel_binary": "",
   "kernel_jump_label_patch_log": "",
   "driver_binary_entry_tuples": [],
-  "receivers": {}
+  "receivers": {
+    "reference_bb": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.reference_bb.csv"
+    },
+    "reference_func": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.reference_func.csv"
+    },
+    "tc_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.tc_bb_emulation.csv",
+      "interval": 1000
+    },
+    "cyc_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.cyc_bb_emulation.csv",
+      "lim_tnt": 47
+    },
+    "cyc_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.cyc_func_emulation.csv",
+      "lim_tnt": 47
+    },
+    "speedscope": {
+      "enabled": true,
+      "path": "trace.trace_huffbench.speedscope.json"
+    }
+  }
 }

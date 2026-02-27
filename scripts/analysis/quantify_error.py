@@ -87,6 +87,8 @@ def main():
     if weighted_error == float("inf"):
         print("WeightedError: inf")
     else:
+        print(f"TotalError: {total_error:.6f}")
+        print(f"TotalTime: {total_time:.6f}")
         print(f"WeightedError: {weighted_error * 100:.4f}%")
 
 

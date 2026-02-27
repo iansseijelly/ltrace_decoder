@@ -74,7 +74,7 @@ impl AbstractReceiver for ReferenceFuncReceiver {
                         let func_entry_time = self.func_entry_time_stack.pop().unwrap();
                         let delta_time = timestamp - func_entry_time;
                         self.writer
-                            .write_all(format!("{},{}\n", delta_time, frame.symbol.name).as_bytes())
+                            .write_all(format!("{},{},{},{}\n", delta_time, frame.symbol.name, func_entry_time, timestamp).as_bytes())
                             .unwrap();
                     }
                 

@@ -112,7 +112,7 @@ impl AbstractReceiver for CycFuncEmulationReceiver {
                                     let func_entry_time = self.func_entry_time_stack.pop().unwrap();
                                     let delta_time = self.curr_cyc - func_entry_time;
                                     self.writer
-                                        .write_all(format!("{},{}", delta_time, frame.symbol.name).as_bytes())
+                                        .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_entry_time, self.curr_cyc).as_bytes())
                                         .unwrap();
                                     self.writer.write_all(b"\n").unwrap();
                                 }
@@ -132,7 +132,7 @@ impl AbstractReceiver for CycFuncEmulationReceiver {
                                 let func_entry_time = self.func_entry_time_stack.pop().unwrap();
                                 let delta_time = self.curr_cyc - func_entry_time;
                                 self.writer
-                                    .write_all(format!("{},{}", delta_time, frame.symbol.name).as_bytes())
+                                    .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_entry_time, self.curr_cyc).as_bytes())
                                     .unwrap();
                                 self.writer.write_all(b"\n").unwrap();
                             }
