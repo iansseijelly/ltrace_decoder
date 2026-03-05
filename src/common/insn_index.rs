@@ -52,13 +52,22 @@ pub fn build_instruction_index(cfg: DecoderStaticCfg) -> Result<InstructionIndex
         panic!("Unsupported architecture: {:?}", m_elf_arch);
     };
     let dasm = Disassembler::new(xlen);
-    let m_text_section = m_elf
-        .section_by_name(".text")
-        .ok_or_else(|| anyhow::anyhow!("No .text section found"))?;
-    let m_text_data = m_text_section.data()?;
-    let m_entry_point = m_elf.entry();
     let mut m_insn_map = FxHashMap::default();
-    m_insn_map.extend(dasm.disassemble_all(&m_text_data, m_entry_point));
+    for section in m_elf.sections() {
+        if let object::SectionFlags::Elf { sh_flags } = section.flags() {
+            if sh_flags & (SHF_EXECINSTR as u64) != 0 {
+                let addr = section.address();
+                let data = section.data()?;
+                m_insn_map.extend(dasm.disassemble_all(&data, addr));
+                debug!(
+                    "machine-space instruction section `{}` @ {:#x}: {} insns",
+                    section.name().unwrap_or("<unnamed>"),
+                    addr,
+                    m_insn_map.len()
+                );
+            }
+        }
+    }
     if m_insn_map.is_empty() {
         return Err(anyhow::anyhow!(
             "No executable instructions found in SBI ELF"
