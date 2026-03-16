@@ -15,7 +15,7 @@ pub struct CycFuncEmulationReceiver {
     n_tnt: u64,
     event_staging: Vec<EventKind>,
     unwinder: StackUnwinder,
-    func_entry_time_stack: Vec<u64>,
+    func_agg_time_stack: Vec<u64>,
 }
 
 /* Emulates the behavior of a CYC-based encoder, used for accuracy analysis
@@ -38,7 +38,7 @@ impl CycFuncEmulationReceiver {
             n_tnt: 0,
             event_staging: Vec::new(),
             unwinder,
-            func_entry_time_stack: Vec::new(),
+            func_agg_time_stack: Vec::new(),
         }
     }
 }
@@ -105,42 +105,55 @@ impl AbstractReceiver for CycFuncEmulationReceiver {
                         let last_event = self.event_staging.pop().unwrap();
 
                         for event in self.event_staging.iter() {
-                            self.curr_cyc += delta_cyc;
+                            // first, always add the delta_cyc to the head value of func_agg_time_stack
+                            if !self.func_agg_time_stack.is_empty() {
+                                let head = self.func_agg_time_stack.pop().unwrap();
+                                self.func_agg_time_stack.push(head + delta_cyc);
+                            }
+
                             if let Some(update) = self.unwinder.step(&Entry::Event { timestamp: self.curr_cyc, kind: event.clone() }) {
                                 for frame in update.frames_closed {
-                                    // pop the func_entry_time_stack
-                                    let func_entry_time = self.func_entry_time_stack.pop().unwrap();
-                                    let delta_time = self.curr_cyc - func_entry_time;
+                                    // pop the func_agg_time_stack
+                                    let func_agg_time = self.func_agg_time_stack.pop().unwrap();
+                                    let delta_time = func_agg_time;
                                     self.writer
-                                        .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_entry_time, self.curr_cyc).as_bytes())
+                                        .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_agg_time, self.curr_cyc).as_bytes())
                                         .unwrap();
                                     self.writer.write_all(b"\n").unwrap();
                                 }
                                 if let Some(_) = update.frames_opened {
-                                    // push the current cycle to the func_entry_time_stack
-                                    self.func_entry_time_stack.push(self.curr_cyc);
+                                    // push the current cycle to the func_agg_time_stack
+                                    self.func_agg_time_stack.push(0);
                                 }
                             }
+                            self.curr_cyc += delta_cyc;
                         }
                         
                         // handle the last event
-                        self.curr_cyc += delta_cyc + slack % num_events;
-                        assert_eq!(self.curr_cyc, timestamp);
+                        // first, always add the delta_cyc to the head value of func_agg_time_stack
+                        if !self.func_agg_time_stack.is_empty() {
+                            let head = self.func_agg_time_stack.pop().unwrap();
+                            let new_head = head + delta_cyc + slack % num_events;
+                            self.func_agg_time_stack.push(new_head);
+                        }
+
                         if let Some(update) = self.unwinder.step(&Entry::Event { timestamp: timestamp, kind: last_event.clone() }) {
                             for frame in update.frames_closed {
-                                // pop the func_entry_time_stack
-                                let func_entry_time = self.func_entry_time_stack.pop().unwrap();
-                                let delta_time = self.curr_cyc - func_entry_time;
+                                // pop the func_agg_time_stack
+                                let func_agg_time = self.func_agg_time_stack.pop().unwrap();
+                                let delta_time = func_agg_time;
                                 self.writer
-                                    .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_entry_time, self.curr_cyc).as_bytes())
+                                    .write_all(format!("{},{},{},{}", delta_time, frame.symbol.name, func_agg_time, self.curr_cyc).as_bytes())
                                     .unwrap();
                                 self.writer.write_all(b"\n").unwrap();
                             }
                             if let Some(_) = update.frames_opened {
-                                // push the current cycle to the func_entry_time_stack
-                                self.func_entry_time_stack.push(self.curr_cyc);
+                                // push the current cycle to the func_agg_time_stack
+                                self.func_agg_time_stack.push(0);
                             }
                         }
+                        self.curr_cyc += delta_cyc + slack % num_events;
+                        assert_eq!(self.curr_cyc, timestamp);
                         // clear the states
                         self.event_staging.clear();
                         self.n_tnt = 0;

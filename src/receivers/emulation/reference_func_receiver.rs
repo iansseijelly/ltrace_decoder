@@ -68,20 +68,25 @@ impl AbstractReceiver for ReferenceFuncReceiver {
                 self.curr_timestamp = timestamp;
             }
             Entry::Event { timestamp, kind } => {
-                self.curr_timestamp = timestamp;
+                // first, always add the timestamp to the head value of func_entry_time_stack
+                if !self.func_entry_time_stack.is_empty() {
+                    let head = self.func_entry_time_stack.pop().unwrap();
+                    self.func_entry_time_stack.push(head + timestamp - self.curr_timestamp);
+                }
+
                 if let Some(update) = self.unwinder.step(&Entry::Event { timestamp, kind }) {
                     for frame in update.frames_closed {
-                        let func_entry_time = self.func_entry_time_stack.pop().unwrap();
-                        let delta_time = timestamp - func_entry_time;
+                        let delta_time = self.func_entry_time_stack.pop().unwrap();
                         self.writer
-                            .write_all(format!("{},{},{},{}\n", delta_time, frame.symbol.name, func_entry_time, timestamp).as_bytes())
+                            .write_all(format!("{},{}\n", delta_time, frame.symbol.name).as_bytes())
                             .unwrap();
                     }
                 
                     if let Some(_) = update.frames_opened {
-                        self.func_entry_time_stack.push(timestamp);
+                        self.func_entry_time_stack.push(0); // 0 means the function has not started yet
                     }
                 }
+                self.curr_timestamp = timestamp;
             }
             _ => {}
         }
