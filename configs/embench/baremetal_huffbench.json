@@ -30,7 +30,7 @@
       "lim_tnt": 47
     },
     "speedscope": {
-      "enabled": true,
+      "enabled": false,
       "path": "trace.trace_huffbench.speedscope.json"
     }
   }

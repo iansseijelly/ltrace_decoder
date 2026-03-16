@@ -6,12 +6,13 @@
   ],
   "machine_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin",
   "kernel_binary": "../firemarshal/images/firechip/trace-hello/trace-hello-bin-dwarf",
-  "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-01-06--05-35-54-trace-hello/trace-hello-run-chores/jump_label_patch_map.txt",
+  "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-12--19-05-49-trace-hello/trace-hello-run-chores/jump_label_patch_map.txt",
   "driver_binary_entry_tuples": [
-    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff0169d000"],
-    ["../firemarshal/images/firechip/trace-hello/iceblk-dwarf", "0xffffffff016ac000"]
+    ["../firemarshal/images/firechip/trace-hello/tacit-dwarf", "0xffffffff01b08000"],
+    ["../firemarshal/images/firechip/trace-hello/iceblk-dwarf", "0xffffffff01aa7000"]
   ],
   "receivers": {
+    "txt": { "enabled": true, "path": "trace.txt" },
     "speedscope": { "enabled": true, "path": "trace.speedscope.json" }
   }
 }
