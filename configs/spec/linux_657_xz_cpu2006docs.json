@@ -1,8 +1,8 @@
 {
-  "encoded_trace": "/scratch/iansseijelly/interesting_profile/spec17-intspeed-traced-wave2-641.leela_s.out",
+  "encoded_trace": "/scratch/iansseijelly/interesting_profile/spec17-intspeed-traced-wave2-657.xz_s-cpu2006docs.out",
   "user_binaries": [
     {
-      "binary": "../spec2017/speckle/build/overlay/intspeed/test/641.leela_s/leela_s_base.riscv-64",
+      "binary": "../spec2017/speckle/build/overlay/intspeed/test/657.xz_s/xz_s_base.riscv-64",
       "asids": [117]
     }
   ],
@@ -16,17 +16,17 @@
     ],
     [
       "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
-      "0xffffffff01aa7000"
+      "0xffffffff01b88000"
     ]
   ],
   "receivers": {
     "sqlite": {
       "enabled": true,
-      "path": "trace.leela_s.sqlite.db"
+      "path": "trace.xz_s-cpu2006docs.sqlite.db"
     },
     "bb_stats": {
       "enabled": false,
-      "path": "trace.bb_stats.leela_s.csv",
+      "path": "trace.bb_stats.xz_s-cpu2006docs.csv",
       "do_user": true
     }
   }

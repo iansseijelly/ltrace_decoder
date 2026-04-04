@@ -1,0 +1,62 @@
+{
+    "encoded_trace": "/scratch/iansseijelly/interesting_profile/ipi_storm.tacit1.out",
+    "user_binaries": [
+        {
+            "binary": "../firemarshal/example-workloads/ipi-storm/overlay/root/ipi-storm/trace-submit",
+            "asids": [
+                106,
+                107
+            ]
+        },
+        {
+            "binary": "../firemarshal/example-workloads/ipi-storm/overlay/root/ipi-storm/hello",
+            "asids": [
+                108
+            ]
+        }
+    ],
+    "machine_binary": "../firemarshal/images/firechip/ipi-storm/ipi-storm-bin",
+    "kernel_binary": "../firemarshal/images/firechip/ipi-storm/ipi-storm-bin-dwarf",
+    "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-29--21-38-08-ipi-storm/ipi-storm-run-chores/jump_label_patch_map.txt",
+    "driver_binary_entry_tuples": [
+        [
+            "../firemarshal/images/firechip/ipi-storm/tacit-dwarf",
+            "0xffffffff01b08000"
+        ],
+        [
+            "../firemarshal/images/firechip/ipi-storm/iceblk-dwarf",
+            "0xffffffff01b88000"
+        ]
+    ],
+    "receivers": {
+        "txt": {
+            "enabled": true,
+            "path": "trace.ipi_storm_1.txt"
+        },
+        "prv_breakdown": {
+            "enabled": false
+        },
+        "speedscope": {
+            "enabled": false,
+            "path": "trace.ipi_storm_1.speedscope.json"
+        },
+        "bb_stats": {
+            "enabled": false,
+            "path": "trace.bb_stats.csv",
+            "do_supervisor": true
+        },
+        "sqlite": {
+            "enabled": false,
+            "path": "trace.db"
+        },
+        "func_path": {
+            "enabled": true,
+            "path": "trace.ipi_storm_1.func_path.csv",
+            "func_name": "_trap_handler",
+            "ctx": 108,
+            "filter_contains": "tlb_process",
+            "post_exit_path": "trace.ipi_storm_1.func_path.post_exit.csv",
+            "post_exit_n": 10
+        }
+    }
+}

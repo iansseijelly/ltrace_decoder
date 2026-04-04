@@ -223,8 +223,8 @@ impl std::fmt::Display for EventKind {
                 ctx,
             } => write!(
                 f,
-                "Trap: {:#x} -> {:#x} ({:?} {:?})",
-                arc.0, arc.1, reason, prv_arc
+                "Trap: {:#x} -> {:#x} ({:?} {:?}) (ctx: {:?})",
+                arc.0, arc.1, reason, prv_arc, ctx
             ),
             EventKind::SyncStart {
                 runtime_cfg,

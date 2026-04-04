@@ -10,44 +10,76 @@
         {
             "binary": "../firemarshal/example-workloads/process-launch/overlay/root/process-launch/dummy",
             "asids": [
-                1077,
-                1078,
-                1079,
-                1080,
-                1081,
-                1082,
-                1083,
-                1084,
-                1085,
-                1086,
-                1087,
-                1088,
-                1089,
-                1090,
-                1091,
-                1092,
-                1093,
-                1094,
-                1095,
-                1096,
-                1097,
-                1098,
-                1099,
-                1100,
-                1101,
-                1102,
-                1103,
-                1104,
-                1105,
-                1106,
-                1107,
-                1108
+                977,
+                978,
+                979,
+                980,
+                981,
+                982,
+                983,
+                984,
+                985,
+                986,
+                987,
+                988,
+                989,
+                990,
+                991,
+                992,
+                993,
+                994,
+                995,
+                996,
+                997,
+                998,
+                999,
+                1000,
+                1001,
+                1002,
+                1003,
+                1004,
+                1005,
+                1006,
+                1007,
+                1008,
+                1009,
+                1010,
+                1011,
+                1012,
+                1013,
+                1014,
+                1015,
+                1016,
+                1017,
+                1018,
+                1019,
+                1020,
+                1021,
+                1022,
+                1023,
+                1024,
+                1025,
+                1026,
+                1027,
+                1028,
+                1029,
+                1030,
+                1031,
+                1032,
+                1033,
+                1034,
+                1035,
+                1036,
+                1037,
+                1038,
+                1039,
+                1040
             ]
         }
     ],
     "machine_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin",
     "kernel_binary": "../firemarshal/images/firechip/process-launch/process-launch-bin-dwarf",
-    "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-02-18--00-01-56-trace-hello/trace-hello-run-chores/jump_label_patch_map.txt",
+    "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-29--21-38-08-ipi-storm/ipi-storm-run-chores/jump_label_patch_map.txt",
     "driver_binary_entry_tuples": [
         [
             "../firemarshal/images/firechip/process-launch/tacit-dwarf",
@@ -55,25 +87,35 @@
         ],
         [
             "../firemarshal/images/firechip/process-launch/iceblk-dwarf",
-            "0xffffffff01b6b000"
+            "0xffffffff01b88000"
         ]
     ],
     "receivers": {
         "txt": {
-            "enabled": true,
-            "path": "trace.test.txt"
+            "enabled": false,
+            "path": "trace.process-launch.txt"
         },
         "prv_breakdown": {
             "enabled": true
         },
         "speedscope": {
             "enabled": true,
-            "path": "trace.speedscope.json"
+            "path": "trace.process-launch.speedscope.json"
         },
         "bb_stats": {
             "enabled": false,
             "path": "trace.bb_stats.csv",
             "do_supervisor": true
+        },
+        "iteration_breakdown": {
+            "enabled": true,
+            "marker_func": "syscall",
+            "tracked_func": "rcu_do_batch",
+            "path": "trace.iteration_breakdown.csv"
+        },
+        "sqlite": {
+            "enabled": false,
+            "path": "trace.db"
         }
     }
 }

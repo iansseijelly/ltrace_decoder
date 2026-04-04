@@ -48,7 +48,7 @@ pub fn factory(
     Box::new(ReferenceFuncReceiver::new(bus_rx, Arc::clone(&_shared.symbol_index), path))
 }
 
-crate::register_receiver!("reference_func", factory);
+crate::register_receiver!("reference_func_old", factory);
 
 impl AbstractReceiver for ReferenceFuncReceiver {
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {

@@ -11,27 +11,37 @@ pub mod bb_stats_receiver;
 pub mod path_profile_receiver;
 #[path = "analysis/prv_breakdown_receiver.rs"]
 pub mod prv_breakdown_receiver;
-#[path = "analysis/speedscope_receiver.rs"]
-pub mod speedscope_receiver;
-#[path = "analysis/stack_txt_receiver.rs"]
-pub mod stack_txt_receiver;
-// #[path = "analysis/txt_delta_receiver.rs"]
-// pub mod txt_delta_receiver;
-#[path = "analysis/txt_receiver.rs"]
-pub mod txt_receiver;
+#[path = "analysis/iteration_breakdown_receiver.rs"]
+pub mod iteration_breakdown_receiver;
+#[path = "analysis/func_path_receiver.rs"]
+pub mod func_path_receiver;
 
-#[path = "emulation/cyc_bb_emulation_receiver.rs"]
-pub mod cyc_bb_emulation_receiver;
-#[path = "emulation/tc_bb_emulation_receiver.rs"]
-pub mod tc_bb_emulation_receiver;
-#[path = "emulation/cyc_func_emulation_receiver.rs"]
-pub mod cyc_func_emulation_receiver;
+#[path = "print/speedscope_receiver.rs"]
+pub mod speedscope_receiver;
+#[path = "print/stack_txt_receiver.rs"]
+pub mod stack_txt_receiver;
+#[path = "print/txt_delta_receiver.rs"]
+pub mod txt_delta_receiver;
+#[path = "print/txt_receiver.rs"]
+pub mod txt_receiver;
+#[path = "print/sqlite_receiver.rs"]
+pub mod sqlite_receiver;
+
+// #[path = "emulation/cyc_bb_emulation_receiver.rs"]
+// pub mod cyc_bb_emulation_receiver;
+// #[path = "emulation/tc_bb_emulation_receiver.rs"]
+// pub mod tc_bb_emulation_receiver;
+// #[path = "emulation/cyc_func_emulation_receiver.rs"]
+// pub mod cyc_func_emulation_receiver;
 // pub mod tc_func_emulation_receiver;
 
-#[path = "emulation/reference_bb_receiver.rs"]
-pub mod reference_bb_receiver;
-#[path = "emulation/reference_func_receiver.rs"]
-pub mod reference_func_receiver;
+#[path = "emulation/mod.rs"]
+pub mod emulation;
+
+// #[path = "emulation/reference_bb_receiver.rs"]
+// pub mod reference_bb_receiver;
+// #[path = "emulation/reference_func_receiver.rs"]
+// pub mod reference_func_receiver;
 
 // TODO: mask off for now until verified again
 // #[path = "experimental/afdo_receiver.rs"]

@@ -6,6 +6,7 @@ extern crate indicatif;
 extern crate log;
 extern crate object;
 extern crate rustc_data_structures;
+extern crate rusqlite;
 extern crate rvdasm;
 
 mod frontend {
@@ -102,7 +103,7 @@ fn main() -> Result<()> {
             || !Path::new(&static_cfg.machine_binary).is_file())
     {
         return Err(anyhow::anyhow!(
-            "SBI binary file is not valid: {}",
+            "Machine binary file is not valid: {}",
             static_cfg.machine_binary
         ));
     }

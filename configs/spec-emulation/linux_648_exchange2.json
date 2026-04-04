@@ -20,14 +20,35 @@
     ]
   ],
   "receivers": {
-    "sqlite": {
+    "tnt_cyc_nret_bb_emulation": {
       "enabled": true,
-      "path": "trace.exchange2_s.sqlite.db"
+      "path": "trace.trace_perlbench.tnt_cyc_nret_bb_emulation.csv",
+      "lim_tnt": 47
     },
-    "bb_stats": {
-      "enabled": false,
-      "path": "trace.bb_stats.exchange2_s.csv",
-      "do_user": true
+    "tnt_cyc_retcompressed_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_retcompressed_bb_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tc_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tc_bb_emulation.csv",
+      "interval": 1000
+    },
+    "tnt_cyc_nret_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_nret_func_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tnt_cyc_retcompressed_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_retcompressed_func_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tc_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tc_func_emulation.csv",
+      "interval": 1000
     }
   }
 }

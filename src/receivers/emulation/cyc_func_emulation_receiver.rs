@@ -60,7 +60,7 @@ pub fn factory(
     Box::new(CycFuncEmulationReceiver::new(bus_rx, Arc::clone(&_shared.symbol_index), path, lim_tnt))
 }
 
-crate::register_receiver!("cyc_func_emulation", factory);
+crate::register_receiver!("cyc_func_emulation_old", factory);
 
 impl AbstractReceiver for CycFuncEmulationReceiver {
     fn bus_rx(&mut self) -> &mut BusReader<Entry> {

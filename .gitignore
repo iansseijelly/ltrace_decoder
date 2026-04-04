@@ -15,4 +15,5 @@ target-rust-analyzer/
 *.log
 *.speedscope.json
 *.csv
-
+*.png
+*.sqlite.db*
