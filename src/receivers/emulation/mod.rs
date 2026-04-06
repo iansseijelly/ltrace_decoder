@@ -14,8 +14,3 @@ pub mod tnt_cyc_nret_emulator;
 pub mod tnt_cyc_retcompressed_emulator;
 #[path = "tc_emulator.rs"]
 pub mod tc_emulator;
-
-#[path = "cyc_func_emulation_receiver.rs"]
-pub mod cyc_func_emulation_receiver;
-#[path = "reference_func_receiver.rs"]
-pub mod reference_func_receiver;

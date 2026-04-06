@@ -52,13 +52,13 @@ pub fn tnt_cyc_nret_bb_emulation_factory(
 crate::register_receiver!("tnt_cyc_nret_bb_emulation", tnt_cyc_nret_bb_emulation_factory);
 
 pub fn tnt_cyc_retcompressed_bb_emulation_factory(
-    _shared: &Shared, config: serde_json::Value, bus_rx: BusReader<Entry>,
+    shared: &Shared, config: serde_json::Value, bus_rx: BusReader<Entry>,
 ) -> Box<dyn AbstractReceiver> {
     let (path, dump_csv) = parse_common(&config);
     let lim_tnt = config.get("lim_tnt").and_then(|v| v.as_u64()).unwrap_or(6);
     let name = format!("tnt_cyc_retcompressed_bb_emulation_{}", lim_tnt);
     let analyzer = Box::new(BBAnalyzer::new(name.clone(), path, dump_csv));
-    Box::new(EmulationReceiver::new(bus_rx, name, Box::new(TNTCycRETCompressedEmulator::new(analyzer, lim_tnt))))
+    Box::new(EmulationReceiver::new(bus_rx, name, Box::new(TNTCycRETCompressedEmulator::new(analyzer, lim_tnt, Arc::clone(&shared.insn_index)))))
 }
 crate::register_receiver!("tnt_cyc_retcompressed_bb_emulation", tnt_cyc_retcompressed_bb_emulation_factory);
 
@@ -93,7 +93,7 @@ pub fn tnt_cyc_retcompressed_func_emulation_factory(
     let lim_tnt = config.get("lim_tnt").and_then(|v| v.as_u64()).unwrap_or(6);
     let name = format!("tnt_cyc_retcompressed_func_emulation_{}", lim_tnt);
     let analyzer = Box::new(FuncAnalyzer::new(name.clone(), path, dump_csv, Arc::clone(&shared.symbol_index)));
-    Box::new(EmulationReceiver::new(bus_rx, name, Box::new(TNTCycRETCompressedEmulator::new(analyzer, lim_tnt))))
+    Box::new(EmulationReceiver::new(bus_rx, name, Box::new(TNTCycRETCompressedEmulator::new(analyzer, lim_tnt, Arc::clone(&shared.insn_index)))))
 }
 crate::register_receiver!("tnt_cyc_retcompressed_func_emulation", tnt_cyc_retcompressed_func_emulation_factory);
 

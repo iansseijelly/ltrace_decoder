@@ -15,31 +15,29 @@ pub struct TNTCycRETCompressedEmulator {
     n_tnt: u64,
     curr_cyc: u64,
     analyzer: Box<dyn AbstractEmulatedAnalyzer>,
+    insn_index: Arc<InstructionIndex>,
+    curr_prv: Prv,
+    curr_ctx: u64,
     stack: CircularBuffer<STACK_DEPTH, u64>,
     needs_flush: bool,
     num_compressed: u64,
 }
 
 impl TNTCycRETCompressedEmulator {
-    pub fn new(analyzer: Box<dyn AbstractEmulatedAnalyzer>, lim_tnt: u64) -> Self {
+    pub fn new(analyzer: Box<dyn AbstractEmulatedAnalyzer>, lim_tnt: u64, insn_index: Arc<InstructionIndex>) -> Self {
         Self {
             event_staging: Vec::new(),
             analyzer,
-            lim_tnt: lim_tnt,
+            lim_tnt,
             n_tnt: 0,
             curr_cyc: 0,
+            insn_index,
+            curr_prv: Prv::PrvMachine,
+            curr_ctx: 0,
             stack: CircularBuffer::<STACK_DEPTH, u64>::new(),
             needs_flush: false,
             num_compressed: 0,
         }
-    }
-}
-
-pub fn close_enough(s: u64, b: u64) -> bool {
-    if s + 2 == b || s + 4 == b {
-        true
-    } else {
-        false
     }
 }
 
@@ -49,8 +47,10 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
             Entry::Event { timestamp, kind } => {
                 match kind {
                     // first, always stage the event
-                    EventKind::SyncStart { .. } => {
+                    EventKind::SyncStart { start_prv, start_ctx, .. } => {
                         self.curr_cyc = timestamp;
+                        self.curr_prv = start_prv;
+                        self.curr_ctx = start_ctx;
                         self.analyzer.push_emulated_event(EmulationResult {
                             reference_delta: 0,
                             emulated_delta: 0,
@@ -66,7 +66,9 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
                         self.event_staging.push((timestamp, kind.clone()));
                     }
                     EventKind::InferrableJump { arc } => {
-                        self.stack.push_back(arc.0);
+                        let insn_map = self.insn_index.get(self.curr_prv, self.curr_ctx);
+                        let insn_len = insn_map.get(&arc.0).map(|insn| insn.len as u64).unwrap_or(4);
+                        self.stack.push_back(arc.0 + insn_len);
                         self.event_staging.push((timestamp, kind.clone()));
                     }
                     EventKind::UninferableJump { arc } => {
@@ -74,7 +76,7 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
                         if !self.stack.is_empty() {
                             let curr_top = *self.stack.nth_back(0).unwrap();
                             // if the current top is the same as where we will return to, then we can compress the event
-                            if close_enough(curr_top, arc.1) {
+                            if curr_top == arc.1 {
                                 self.stack.pop_back();
                                 self.n_tnt += 1;
                                 self.num_compressed += 1;
@@ -84,7 +86,11 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
                             }
                         }
                     }
-                    EventKind::Trap { .. } => {
+                    EventKind::Trap { prv_arc, ctx, .. } => {
+                        self.curr_prv = prv_arc.1;
+                        if let Some(c) = ctx {
+                            self.curr_ctx = c;
+                        }
                         self.event_staging.push((timestamp, kind.clone()));
                         self.needs_flush = true; // unconditionally flush on trap
                     }
