@@ -2,6 +2,7 @@
 members = [
   ".",
   "crates/gcno_reader",
+  "crates/trace_db_tools",
 ]
 
 [package]
@@ -27,3 +28,6 @@ indexmap = "2.7.0"
 jsonschema = "0.17"
 indicatif = "0.18.0"
 rustc_data_structures = "0.1.2"
+inventory = "0.3"
+rusqlite = { version = "0.31", features = ["bundled"] }
+circular-buffer = "1.2.0"

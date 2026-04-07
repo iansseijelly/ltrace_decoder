@@ -16,12 +16,12 @@ pub struct SymbolInfo {
     pub name: String,
     pub src: SourceLocation,
     pub prv: Prv,
-    pub ctx: u64,
 }
 
 pub struct SymbolIndex {
     // use BTreeMap as symbol maps need to be ordered
-    u_symbol_map: HashMap<u64, BTreeMap<u64, SymbolInfo>>,
+    asid_to_binary_id_map: HashMap<u64, usize>,
+    u_symbol_maps: Vec<BTreeMap<u64, SymbolInfo>>,
     k_symbol_map: BTreeMap<u64, SymbolInfo>,
     m_symbol_map: BTreeMap<u64, SymbolInfo>,
 }
@@ -29,15 +29,21 @@ pub struct SymbolIndex {
 impl SymbolIndex {
     pub fn get(&self, prv: Prv, ctx: u64) -> &BTreeMap<u64, SymbolInfo> {
         match prv {
-            Prv::PrvUser => &self.u_symbol_map[&ctx],
+            Prv::PrvUser => {
+                if let Some(binary_id) = self.asid_to_binary_id_map.get(&ctx) {
+                    &self.u_symbol_maps[*binary_id]
+                } else {
+                    panic!("Context {} not found in symbol index", ctx);
+                }
+            }
             Prv::PrvSupervisor => &self.k_symbol_map,
             Prv::PrvMachine => &self.m_symbol_map,
             _ => panic!("Unsupported privilege level: {:?}", prv),
         }
     }
 
-    pub fn get_user_symbol_map(&self) -> &HashMap<u64, BTreeMap<u64, SymbolInfo>> {
-        &self.u_symbol_map
+    pub fn get_user_symbol_map(&self) -> &Vec<BTreeMap<u64, SymbolInfo>> {
+        &self.u_symbol_maps
     }
 
     pub fn get_kernel_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
@@ -46,6 +52,10 @@ impl SymbolIndex {
 
     pub fn get_machine_symbol_map(&self) -> &BTreeMap<u64, SymbolInfo> {
         &self.m_symbol_map
+    }
+
+    pub fn get_asid_to_binary_id_map(&self) -> &HashMap<u64, usize> {
+        &self.asid_to_binary_id_map
     }
 
     /// Return the half-open address range `[start, end)` for the function that
@@ -75,14 +85,20 @@ pub fn build_single_symbol_index(
     elf_path: String,
     prv: Prv,
     offset: u64,
-    ctx: u64,
 ) -> Result<BTreeMap<u64, SymbolInfo>> {
     // open application elf for symbol processing
     let elf_data = fs::read(&elf_path)?;
     let obj_file = object::File::parse(&*elf_data)?;
     debug!("elf_path: {}", elf_path);
-    let loader = Loader::new(&elf_path)
-        .map_err(|e| anyhow::Error::msg("loader error: ".to_string() + &e.to_string()))?;
+    let loader = match Loader::new(&elf_path) {
+        Ok(loader) => Some(loader),
+        Err(e) => {
+            // Some DWARF encodings (e.g., newer range list formats) can trip up
+            // addr2line/gimli. We still want symbols, just without source info.
+            warn!("DWARF loader error for {}: {}", elf_path, e);
+            None
+        }
+    };
 
     // Gather indices of all executable sections
     let exec_secs: std::collections::HashSet<_> = obj_file
@@ -104,10 +120,11 @@ pub fn build_single_symbol_index(
             if exec_secs.contains(&sec_idx) {
                 if let Ok(name) = symbol.name() {
                     // filter out ghost symbols
-                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L") {
+                    if !name.starts_with("$x") && !name.starts_with("$d") && !name.starts_with(".L")
+                    {
                         let addr = symbol.address();
                         // lookup source location (may return None)
-                        let loc = loader.find_location(addr);
+                        let loc = loader.as_ref().map(|l| l.find_location(addr));
                         let mut info: SymbolInfo = SymbolInfo {
                             name: name.to_string(),
                             src: SourceLocation {
@@ -116,11 +133,12 @@ pub fn build_single_symbol_index(
                                 prv: prv,
                             },
                             prv: prv,
-                            ctx: ctx,
                         };
-                        if let Ok(Some(loc)) = loc {
-                            let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
-                            info.src = src;
+                        if let Some(loc) = loc {
+                            if let Ok(Some(loc)) = loc {
+                                let src: SourceLocation = SourceLocation::from_addr2line(loc, prv);
+                                info.src = src;
+                            }
                         }
                         // dedupe aliases: prefer non‑empty over empty
                         if let Some(existing) = func_symbol_map.get_mut(&addr) {
@@ -145,34 +163,38 @@ pub fn build_single_symbol_index(
 }
 
 pub fn build_symbol_index(cfg: DecoderStaticCfg) -> Result<SymbolIndex> {
-    let mut u_symbol_maps = HashMap::new();
-    for (binary, asid) in cfg.application_binary_asid_tuples.clone() {
+    // Build a asid to binary id map
+    let mut asid_to_binary_id_map = HashMap::new();
+    for (i, user_binary) in cfg.user_binaries.iter().enumerate() {
+        for asid in user_binary.asids.clone() {
+            asid_to_binary_id_map.insert(asid, i);
+        }
+    }
+    let mut u_symbol_maps = Vec::new();
+    for user_binary in cfg.user_binaries.iter() {
         let u_func_symbol_map =
-            build_single_symbol_index(binary.clone(), Prv::PrvUser, 0, asid.parse::<u64>()?)?;
-        u_symbol_maps.insert(asid.parse::<u64>()?, u_func_symbol_map);
+            build_single_symbol_index(user_binary.binary.clone(), Prv::PrvUser, 0)?;
+        u_symbol_maps.push(u_func_symbol_map);
         debug!("u_symbol_maps size: {}", u_symbol_maps.len());
     }
     let mut k_func_symbol_map = BTreeMap::new();
     if cfg.kernel_binary != "" {
         k_func_symbol_map =
-            build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0, 0)?;
+            build_single_symbol_index(cfg.kernel_binary.clone(), Prv::PrvSupervisor, 0)?;
         debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         for (binary, entry) in cfg.driver_binary_entry_tuples {
             let driver_entry_point = u64::from_str_radix(entry.trim_start_matches("0x"), 16)?;
-            let func_symbol_map = build_single_symbol_index(
-                binary.clone(),
-                Prv::PrvSupervisor,
-                driver_entry_point,
-                0,
-            )?;
+            let func_symbol_map =
+                build_single_symbol_index(binary.clone(), Prv::PrvSupervisor, driver_entry_point)?;
             k_func_symbol_map.extend(func_symbol_map);
             debug!("k_func_symbol_map size: {}", k_func_symbol_map.len());
         }
     }
     let m_func_symbol_map =
-        build_single_symbol_index(cfg.sbi_binary.clone(), Prv::PrvMachine, 0, 0)?;
+        build_single_symbol_index(cfg.machine_binary.clone(), Prv::PrvMachine, 0)?;
     Ok(SymbolIndex {
-        u_symbol_map: u_symbol_maps,
+        asid_to_binary_id_map,
+        u_symbol_maps,
         k_symbol_map: k_func_symbol_map,
         m_symbol_map: m_func_symbol_map,
     })

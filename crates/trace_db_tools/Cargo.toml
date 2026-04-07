@@ -1,0 +1,10 @@
+[package]
+name = "trace_db_tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+clap = { version = "4.5.32", features = ["derive"] }
+indicatif = "0.18.0"
+anyhow = "1.0"

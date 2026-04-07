@@ -204,17 +204,94 @@ impl From<TrapType> for TrapReason {
 impl std::fmt::Display for EventKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EventKind::TakenBranch { arc } => write!(f, "TakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
-            EventKind::NonTakenBranch { arc } => write!(f, "NonTakenBranch: {:#x} -> {:#x}", arc.0, arc.1),
-            EventKind::UninferableJump { arc } => write!(f, "UninferableJump: {:#x} -> {:#x}", arc.0, arc.1),
-            EventKind::InferrableJump { arc } => write!(f, "InferrableJump: {:#x} -> {:#x}", arc.0, arc.1),
-            EventKind::Trap { reason, prv_arc, arc, ctx } => write!(f, "Trap: {:#x} -> {:#x} ({:?} {:?})", arc.0, arc.1, reason, prv_arc),
-            EventKind::SyncStart { runtime_cfg, start_pc, start_prv, start_ctx } => write!(f, "SyncStart: {:#x} ({:?} {:?}) {:?}", start_pc, start_prv, start_ctx, runtime_cfg),
+            EventKind::TakenBranch { arc } => {
+                write!(f, "TakenBranch: {:#x} -> {:#x}", arc.0, arc.1)
+            }
+            EventKind::NonTakenBranch { arc } => {
+                write!(f, "NonTakenBranch: {:#x} -> {:#x}", arc.0, arc.1)
+            }
+            EventKind::UninferableJump { arc } => {
+                write!(f, "UninferableJump: {:#x} -> {:#x}", arc.0, arc.1)
+            }
+            EventKind::InferrableJump { arc } => {
+                write!(f, "InferrableJump: {:#x} -> {:#x}", arc.0, arc.1)
+            }
+            EventKind::Trap {
+                reason,
+                prv_arc,
+                arc,
+                ctx,
+            } => write!(
+                f,
+                "Trap: {:#x} -> {:#x} ({:?} {:?}) (ctx: {:?})",
+                arc.0, arc.1, reason, prv_arc, ctx
+            ),
+            EventKind::SyncStart {
+                runtime_cfg,
+                start_pc,
+                start_prv,
+                start_ctx,
+            } => write!(
+                f,
+                "SyncStart: {:#x} ({:?} {:?}) {:?}",
+                start_pc, start_prv, start_ctx, runtime_cfg
+            ),
             EventKind::SyncEnd { end_pc } => write!(f, "SyncEnd: {:#x}", end_pc),
             EventKind::SyncPeriodic => write!(f, "SyncPeriodic"),
             EventKind::BPHit { hit_count } => write!(f, "BPHit: {}", hit_count),
             EventKind::BPMiss => write!(f, "BPMiss"),
             EventKind::Panic => write!(f, "Panic"),
+        }
+    }
+}
+
+impl EventKind {
+    pub fn to_csv_string(&self) -> String {
+        match self {
+            EventKind::TakenBranch { arc } => {
+                format!("TB,{:#x},{:#x}", arc.0, arc.1)
+            }
+            EventKind::NonTakenBranch { arc } => {
+                format!("NTB,{:#x},{:#x}", arc.0, arc.1)
+            }
+            EventKind::UninferableJump { arc } => {
+                format!("UJ,{:#x},{:#x}", arc.0, arc.1)
+            }
+            EventKind::InferrableJump { arc } => {
+                format!("IJ,{:#x},{:#x}", arc.0, arc.1)
+            }
+            EventKind::Trap { reason, prv_arc: _, arc, ctx: _ } => {
+                match reason {
+                    TrapReason::Exception => {
+                        format!("TRAP_EXC,{:#x},{:#x}", arc.0, arc.1)
+                    }
+                    TrapReason::Interrupt => {
+                        format!("TRAP_INT,{:#x},{:#x}", arc.0, arc.1)
+                    }
+                    TrapReason::Return => {
+                        format!("TRAP_RET,{:#x},{:#x}", arc.0, arc.1)
+                    }
+                }
+            }
+            EventKind::SyncStart { runtime_cfg: _, start_pc, start_prv: _, start_ctx: _ } => {
+                format!("SYNC_START,{:#x}, 0x0", start_pc)
+            }
+            EventKind::SyncEnd { end_pc } => {
+                format!("SYNC_END,0x0,{:#x}", end_pc)
+            }
+            EventKind::SyncPeriodic => {
+                format!("SYNC_PERIODIC,0x0,0x0")
+            }
+            // EventKind::BPHit { hit_count } => {
+            //     format!("BPHIT,{}", hit_count)
+            // }
+            // EventKind::BPMiss => {
+            //     format!("BPMISS")
+            // }
+            // EventKind::Panic => {
+            //     format!("PANIC")
+            // }
+            _ => panic!("Unsupported event kind: {:?}", self)
         }
     }
 }

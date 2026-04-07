@@ -1,0 +1,54 @@
+{
+  "encoded_trace": "/scratch/iansseijelly/FIRESIM_RUN_TMP/sim_slot_1/tacit0.out",
+  "user_binaries": [
+    {
+      "binary": "../spec2017/speckle/build/overlay/intspeed/test/605.mcf_s/mcf_s_base.riscv-64",
+      "asids": [117]
+    }
+  ],
+  "machine_binary": "../firemarshal/images/firechip/spec17-intspeed-traced-wave1-600.perlbench_s-traced/spec17-intspeed-traced-wave1-600.perlbench_s-traced-bin",
+  "kernel_binary": "../firemarshal/images/firechip/spec17-intspeed-traced-wave1-600.perlbench_s-traced/spec17-intspeed-traced-wave1-600.perlbench_s-traced-bin-dwarf",
+  "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-20--06-42-57-spec-chores/spec-chores-run-chores/jump_label_patch_map.txt",
+  "driver_binary_entry_tuples": [
+    [
+      "../firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+      "0xffffffff01b08000"
+    ],
+    [
+      "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+      "0xffffffff01b88000"
+    ]
+  ],
+  "receivers": {
+    "tnt_cyc_nret_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_nret_bb_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tnt_cyc_retcompressed_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_retcompressed_bb_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tc_bb_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tc_bb_emulation.csv",
+      "interval": 1000
+    },
+    "tnt_cyc_nret_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_nret_func_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tnt_cyc_retcompressed_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tnt_cyc_retcompressed_func_emulation.csv",
+      "lim_tnt": 47
+    },
+    "tc_func_emulation": {
+      "enabled": true,
+      "path": "trace.trace_perlbench.tc_func_emulation.csv",
+      "interval": 1000
+    }
+  }
+}
