@@ -37,6 +37,14 @@ pub struct StackUnwinder {
     pub insn_map: HashMap<u64, Insn>,
     // stack model
     pub frame_stack: Vec<u32>, // Queue of index
+    // Trap/interrupt nesting: frame_stack depth captured at each trap entry.
+    // A hardware trap begins a NEW stack region — the handler runs "above" the
+    // trapped context. Normal returns must not unwind past the innermost
+    // boundary, and the matching mret restores the stack to exactly that depth.
+    // Without this, an RVV/FPU lazy-context exception fired mid-inference makes
+    // the handler's `ret`s cascade-pop the trapped frames (e.g. run_model_*),
+    // which are then never restored.
+    pub trap_boundaries: Vec<usize>,
 }
 
 impl StackUnwinder {
@@ -107,31 +115,41 @@ impl StackUnwinder {
             if let Some(sec_idx) = symbol.section_index() {
                 if exec_secs.contains(&sec_idx) {
                     if let Ok(name) = symbol.name() {
-                        if !name.starts_with("$x") {
+                        // Skip ARM/RISC-V mapping symbols ($x/$d) and local labels
+                        // (.L*); keep everything else that names code.
+                        if !name.is_empty() && !name.starts_with('$') && !name.starts_with(".L") {
                             let addr = symbol.address();
-                            // lookup source location (may return None)
-                            if let Ok(Some(loc)) = loader.find_location(addr) {
-                                let src: SourceLocation = SourceLocation::from_addr2line(Some(loc));
-                                let info = SymbolInfo {
-                                    name: name.to_string(),
-                                    index: next_index,
-                                    line: src.lines,
-                                    file: src.file.to_string(),
-                                };
-                                // dedupe aliases: prefer non‑empty over empty
-                                if let Some(existing) = func_symbol_map.get_mut(&addr) {
-                                    if existing.name.trim().is_empty() && !info.name.trim().is_empty() {
-                                        *existing = info;
-                                    } else {
-                                        warn!(
-                                            "func_addr 0x{:x} already in map as `{}`, ignoring alias `{}`",
-                                            addr, existing.name, info.name
-                                        );
-                                    }
-                                } else {
-                                    func_symbol_map.insert(addr, info);
-                                    next_index += 1;
+                            // Source location is BEST-EFFORT. Assembly and prebuilt
+                            // libm functions (e.g. roundf, _isr_wrapper) carry no
+                            // DWARF line info, but they MUST still be in the map:
+                            // an indirect CALL (jalr ra, ...) to such a target would
+                            // otherwise fail the is_call test (which keys off symbol
+                            // presence) and be misclassified as a RETURN, unwinding
+                            // the entire call stack (e.g. losing run_model_* when a
+                            // kernel calls roundf). So insert regardless of line info.
+                            let src: SourceLocation = match loader.find_location(addr) {
+                                Ok(Some(loc)) => SourceLocation::from_addr2line(Some(loc)),
+                                _ => SourceLocation::from_addr2line(None),
+                            };
+                            let info = SymbolInfo {
+                                name: name.to_string(),
+                                index: next_index,
+                                line: src.lines,
+                                file: src.file.to_string(),
+                            };
+                            // dedupe aliases at the same address: prefer a non-empty
+                            // name, but KEEP the existing index (do not consume
+                            // next_index — doing so used to collide indices and
+                            // corrupt idx_2_addr_range).
+                            if let Some(existing) = func_symbol_map.get_mut(&addr) {
+                                if existing.name.trim().is_empty() && !info.name.trim().is_empty() {
+                                    existing.name = info.name;
+                                    existing.line = info.line;
+                                    existing.file = info.file;
                                 }
+                            } else {
+                                func_symbol_map.insert(addr, info);
+                                next_index += 1;
                             }
                         }
                     }
@@ -141,18 +159,6 @@ impl StackUnwinder {
 
         // print the size of the func_symbol_map
         debug!("func_symbol_map size: {}", func_symbol_map.len());
-
-        // println!( "Loaded {} symbols:", func_symbol_map.len() );
-        // for (addr, info) in func_symbol_map.iter() {
-        //     println!(
-        //         "  {:#016x} -> {} (idx={}), defined at {}:{}",
-        //         addr,
-        //         info.name,
-        //         info.index,
-        //         info.file,
-        //         info.line,
-        //     );
-        // }
 
         // sort the func_symbol_map by address
         let mut func_symbol_addr_sorted = func_symbol_map.keys().cloned().collect::<Vec<u64>>();
@@ -172,6 +178,7 @@ impl StackUnwinder {
             idx_2_addr_range: idx_2_addr_range,
             insn_map: insn_map,
             frame_stack: Vec::new(),
+            trap_boundaries: Vec::new(),
         })
     }
 
@@ -183,16 +190,20 @@ impl StackUnwinder {
     pub fn step_ij(&mut self, entry: Entry) -> (bool, usize, Option<SymbolInfo>) {
         assert!(entry.event == Event::InferrableJump || entry.event == Event::TrapException || entry.event == Event::TrapInterrupt);
 
+        // A hardware trap/interrupt opens a new stack region: remember the
+        // trapped-context depth so (a) the handler's returns can't unwind past
+        // it and (b) the matching mret restores exactly to it. Record it even
+        // when the handler entry has no symbol (nothing pushed below).
+        if entry.event == Event::TrapException || entry.event == Event::TrapInterrupt {
+            self.trap_boundaries.push(self.frame_stack.len());
+        }
+
         if self.func_symbol_map.contains_key(&entry.arc.1) {
             let frame_idx = self.func_symbol_map[&entry.arc.1].index;
-            if entry.event == Event::TrapInterrupt {
-                println!("Pushing idx: {}", frame_idx);
-            }
             self.frame_stack.push(frame_idx);
             return (true, self.frame_stack.len(), Some(self.func_symbol_map[&entry.arc.1].clone()));
         } else {
             // warn!("step_ij: func_symbol_map does not contain the jump address: {:#x}", entry.arc.1);
-            // println!("step_ij: func_symbol_map does not contain the jump address: {:#x}", entry.arc.1);
             return (false, self.frame_stack.len(), None);
         }
     }
@@ -210,38 +221,51 @@ impl StackUnwinder {
         let target = entry.arc.1;
         let mut closed = Vec::new();
 
-        // 1) mret: always pop exactly one frame
+        // 1) mret: pop the entire handler region, restoring the trapped
+        //    context to the depth recorded at the matching trap entry. This
+        //    discards all frames the handler pushed (which may be more than
+        //    one, and which the handler's own `ret`s could not fully unwind).
         if entry.event == Event::TrapReturn {
+            if let Some(boundary) = self.trap_boundaries.pop() {
+                while self.frame_stack.len() > boundary {
+                    let idx = self.frame_stack.pop().unwrap();
+                    let start = self.idx_2_addr_range[&idx].0;
+                    closed.push(self.func_symbol_map[&start].clone());
+                }
+                return (true, self.frame_stack.len(), closed, None);
+            }
+            // No recorded trap boundary (e.g. a boot-time mret before any
+            // traced trap entry) — fall back to popping exactly one frame.
             if let Some(idx) = self.frame_stack.pop() {
                 let start = self.idx_2_addr_range[&idx].0;
                 let sym = self.func_symbol_map[&start].clone();
                 return (true, self.frame_stack.len(), vec![sym], None);
             } else {
-                // nothing to pop
                 return (false, 0, Vec::new(), None);
             }
         }
 
-
-        // If we see a CALL (direct or indirect), push the new function
-        let dst = prev_insn.get_dst();
-        // TODO: Cleaner way instead of hardcoding jalr check
-        let is_call = (prev_insn.is_indirect_jump() && prev_insn.get_name().contains("jalr"));
+        // If we see a CALL (indirect), push the new function
+        let is_call = prev_insn.is_indirect_jump() && self.func_symbol_map.get(&target).is_some();
         if is_call {
-            // println!("Got here");
-            if let Some(info) = self.func_symbol_map.get(&target) {
-                self.frame_stack.push(info.index);
-                return (true, self.frame_stack.len(), Vec::new(), Some(info.clone()));
-            } else {
-                // call into something we don't know
-                return (false, self.frame_stack.len(), Vec::new(), None);
-            }
+            let info = self.func_symbol_map.get(&target).unwrap().clone();
+            self.frame_stack.push(info.index);
+            return (true, self.frame_stack.len(), Vec::new(), Some(info));
         }
 
         // Otherwise, if it's an indirect jump *and* we still have frames,
         //    treat it like a return within the unwinding loop.
         if prev_insn.is_indirect_jump() && !self.frame_stack.is_empty() {
+            // Never unwind past the innermost trap boundary: a handler's own
+            // returns must stay within the handler region. The mret restores
+            // the trapped context; a `ret` here that appears to leave the
+            // region just means the handler returned toward its trap-entry
+            // stub (e.g. _isr_wrapper), which is not a tracked frame.
+            let floor = self.trap_boundaries.last().copied().unwrap_or(0);
             loop {
+                if self.frame_stack.len() <= floor {
+                    return (true, self.frame_stack.len(), closed, None);
+                }
                 let &idx = self.frame_stack.last().unwrap();
                 let (start, end) = self.idx_2_addr_range[&idx];
                 // still inside the same function?

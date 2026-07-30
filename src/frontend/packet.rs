@@ -14,7 +14,8 @@ pub struct Packet {
     pub f_header: FHeader,
     pub trap_type: TrapType,
     pub target_address: u64,
-    pub trap_address: u64,
+    pub from_address: u64,
+    pub ctx: u64,
     pub timestamp: u64,
 }
 
@@ -27,7 +28,8 @@ impl Packet {
             f_header: FHeader::FRes,
             trap_type: TrapType::TNone,
             target_address: 0,
-            trap_address: 0,
+            from_address: 0,
+            ctx: 0,
             timestamp: 0,
         }
     }
@@ -73,37 +75,46 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
             // println!("f_header: {:?}", f_header);
             match f_header {
                 FHeader::FTb | FHeader::FNt | FHeader::FIj => {
-                    let timestamp = read_varint(stream)?;
-                    packet.timestamp = timestamp;
+                    packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FUj => {
-                    let target_address = read_varint(stream)?;
-                    packet.target_address = target_address;
-                    let timestamp = read_varint(stream)?;
-                    packet.timestamp = timestamp;
+                    packet.target_address = read_varint(stream)?;
+                    packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FSync => {
-                    let _ = read_varint(stream)?; // branch mode, unused in sync end packets
-                    let target_address = read_varint(stream)?;
-                    packet.target_address = target_address;
-                    let timestamp = read_varint(stream)?;
-                    packet.timestamp = timestamp;
+                    // Encoder layout (trace_encoder_l.cc::_generate_sync_packet):
+                    //   header byte, prv byte, ctx (varlen),
+                    //   runtime_cfg byte (S_START only), target (varlen), timestamp (varlen).
+                    // The top 3 bits of the header carry the sync_type.
+                    let sync_type = (first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET;
+                    let _prv = read_u8(stream)?;              // prv: from | to<<3 | 0b10<<6
+                    packet.ctx = read_varint(stream)?;
+                    if sync_type == 0b001 {                   // S_START carries runtime cfg
+                        let _runtime_cfg = read_u8(stream)?;  // br_mode | (bp_size/64)<<2
+                    }
+                    packet.target_address = read_varint(stream)?;
+                    packet.timestamp = read_varint(stream)?;
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
                 }
                 FHeader::FTrap => {
-                    let trap_type = TrapType::from((first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET);
-                    packet.trap_type = trap_type;
-                    let trap_address = read_varint(stream)?;
-                    packet.trap_address = trap_address;
-                    let target_address = read_varint(stream)?;
-                    packet.target_address = target_address;
-                    let timestamp = read_varint(stream)?;
-                    packet.timestamp = timestamp;
+                    // Encoder layout (trace_encoder_l.cc::_generate_trap_packet):
+                    //   header byte, prv byte, ctx (varlen -- ONLY when returning to
+                    //   U mode on a trap-return), from_address, target, timestamp.
+                    let trap_type_raw = (first_byte & TRAP_TYPE_MASK) >> TRAP_TYPE_OFFSET;
+                    let prv = read_u8(stream)?;
+                    let to_priv = (prv >> 3) & 0x7;           // ingress_0.priv (destination)
+                    if to_priv == 0 && trap_type_raw == 0b100 { // P_U && T_TRAP_RETURN
+                        packet.ctx = read_varint(stream)?;
+                    }
+                    packet.from_address = read_varint(stream)?;
+                    packet.target_address = read_varint(stream)?;
+                    packet.timestamp = read_varint(stream)?;
+                    packet.trap_type = TrapType::from(trap_type_raw);
                     packet.f_header = f_header;
                     packet.c_header = CHeader::CNa;
                 }
@@ -117,16 +128,9 @@ pub fn read_packet(stream: &mut BufReader<File>) -> Result<Packet> {
 }
 
 pub fn read_first_packet(stream: &mut BufReader<File>) -> Result<Packet> {
-    let mut packet = Packet::new();
-    let first_byte = read_u8(stream)?;
-    trace!("first_byte: {:08b}", first_byte);
-    let c_header = CHeader::from(first_byte & C_HEADER_MASK);
-    assert!(c_header == CHeader::CNa);
-    let f_header = FHeader::from((first_byte & F_HEADER_MASK) >> FHEADER_OFFSET);
-    assert!(f_header == FHeader::FSync);
-    let target_address = read_varint(stream)?;
-    packet.target_address = target_address;
-    let timestamp = read_varint(stream)?;
-    packet.timestamp = timestamp;
+    // call read_packet
+    let packet = read_packet(stream)?;
+    assert!(packet.f_header == FHeader::FSync);
+    assert!(packet.c_header == CHeader::CNa);
     Ok(packet)
 }
