@@ -52,3 +52,6 @@ pub mod emulation;
 // pub mod atomic_receiver;
 // #[path = "experimental/perfetto_receiver.rs"]
 // pub mod perfetto_receiver;
+
+#[path = "analysis/bb_pair_stats_receiver.rs"]
+pub mod bb_pair_stats_receiver;
