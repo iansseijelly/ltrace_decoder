@@ -8,6 +8,7 @@ pub struct TNTCycNRETEmulator {
     lim_tnt: u64,
     n_tnt: u64,
     curr_cyc: u64,
+    emu_clock: u64,
     analyzer: Box<dyn AbstractEmulatedAnalyzer>,
 }
 
@@ -19,6 +20,7 @@ impl TNTCycNRETEmulator {
             lim_tnt: lim_tnt,
             n_tnt: 0,
             curr_cyc: 0,
+            emu_clock: 0,
         }
     }
 }
@@ -31,9 +33,10 @@ impl AbstractEmulator for TNTCycNRETEmulator {
                     // first, always stage the event
                     EventKind::SyncStart { .. } => {
                         self.curr_cyc = timestamp;
+                        self.emu_clock = timestamp;
                         self.analyzer.push_emulated_event(EmulationResult {
-                            reference_delta: 0,
-                            emulated_delta: 0,
+                            ref_ts: timestamp,
+                            emu_ts: timestamp,
                             event: kind.clone(),
                         });
                     }
@@ -63,21 +66,21 @@ impl AbstractEmulator for TNTCycNRETEmulator {
                         let (last_event_timestamp, last_event) = self.event_staging.pop().unwrap();
 
                         for (event_timestamp, event) in self.event_staging.iter() {
+                            self.emu_clock += delta_cyc;
                             self.analyzer.push_emulated_event(EmulationResult {
-                                reference_delta: event_timestamp - self.curr_cyc,
-                                emulated_delta: delta_cyc,
+                                ref_ts: *event_timestamp,
+                                emu_ts: self.emu_clock,
                                 event: event.clone(),
                             });
-                            self.curr_cyc = *event_timestamp;
                         }
 
                         // write the last event
+                        self.emu_clock += delta_cyc + slack % num_events;
                         self.analyzer.push_emulated_event(EmulationResult {
-                            reference_delta: last_event_timestamp - self.curr_cyc,
-                            emulated_delta: delta_cyc + slack % num_events,
+                            ref_ts: last_event_timestamp,
+                            emu_ts: self.emu_clock,
                             event: last_event.clone(),
                         });
-                        self.curr_cyc = last_event_timestamp;
                         // clear the states
                         self.event_staging.clear();
                         self.n_tnt = 0;

@@ -174,8 +174,9 @@ fn main() -> Result<()> {
     let mut receivers: Vec<Box<dyn AbstractReceiver>> = vec![];
 
     let receiver_cfg = static_cfg.receivers.clone();
+    let emulation_cfg = static_cfg.emulations.clone();
 
-    if !receiver_cfg.is_empty() {
+    if !receiver_cfg.is_empty() || !emulation_cfg.is_empty() {
         let shared =
             receivers::abstract_receiver::Shared::new(&static_cfg.clone(), &runtime_cfg.clone())?;
 
@@ -189,6 +190,23 @@ fn main() -> Result<()> {
             }
             let bus_rx = bus.add_rx();
             let receiver = registry::make_receiver(name, &shared, cfg.clone(), bus_rx)?;
+            receivers.push(receiver);
+        }
+
+        for spec in emulation_cfg.iter() {
+            let enabled = spec
+                .get("enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            if !enabled {
+                continue;
+            }
+            let bus_rx = bus.add_rx();
+            let receiver = receivers::emulation::emulation_pipeline::build_emulation_pipeline(
+                &shared,
+                spec,
+                bus_rx,
+            )?;
             receivers.push(receiver);
         }
     }

@@ -1,3 +1,4 @@
+use crate::backend::event::EventKind;
 use crate::receivers::emulation::abstract_emulator::{AbstractEmulatedAnalyzer, EmulationResult};
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -7,6 +8,8 @@ pub struct BBAnalyzer {
     total_abs_error: u64,
     total_ref_time: u64,
     event_count: u64,
+    prev_ref_ts: u64,
+    prev_emu_ts: u64,
     name: String,
 }
 
@@ -26,6 +29,8 @@ impl BBAnalyzer {
             total_abs_error: 0,
             total_ref_time: 0,
             event_count: 0,
+            prev_ref_ts: 0,
+            prev_emu_ts: 0,
             name,
         }
     }
@@ -33,8 +38,17 @@ impl BBAnalyzer {
 
 impl AbstractEmulatedAnalyzer for BBAnalyzer {
     fn push_emulated_event(&mut self, event: EmulationResult) {
-        let ref_d = event.reference_delta;
-        let emu_d = event.emulated_delta;
+        // a sync (re)establishes the time base without accounting the gap
+        let (ref_d, emu_d) = match event.event {
+            EventKind::SyncStart { .. } => (0, 0),
+            _ => (
+                event.ref_ts.saturating_sub(self.prev_ref_ts),
+                event.emu_ts.saturating_sub(self.prev_emu_ts),
+            ),
+        };
+        self.prev_ref_ts = event.ref_ts;
+        self.prev_emu_ts = event.emu_ts;
+
         self.total_abs_error += ref_d.abs_diff(emu_d);
         self.total_ref_time += ref_d;
         self.event_count += 1;

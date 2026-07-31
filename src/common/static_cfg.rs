@@ -12,6 +12,9 @@ pub struct DecoderStaticCfg {
     pub kernel_jump_label_patch_log: String,
     pub driver_binary_entry_tuples: Vec<(String, String)>,
     pub receivers: HashMap<String, serde_json::Value>,
+    // list of emulation pipelines: each spec bundles an emulated trace format
+    // with its error analyzers and chained receivers (see emulation_pipeline.rs)
+    pub emulations: Vec<serde_json::Value>,
 }
 
 pub fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {

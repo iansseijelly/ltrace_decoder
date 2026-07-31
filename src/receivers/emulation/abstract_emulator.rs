@@ -11,8 +11,14 @@ pub trait AbstractEmulatedAnalyzer: Send + 'static {
     fn flush(&mut self);
 }
 
+// One trace event under two clocks. `ref_ts` is the golden hardware timestamp;
+// `emu_ts` is the timestamp the emulated sparse format would attribute to the
+// same event. Both are absolute, so consumers can either diff consecutive
+// results (error analyzers) or project `emu_ts` into a re-timed Entry stream
+// (fan-out to ordinary receivers).
+#[derive(Clone)]
 pub struct EmulationResult {
-    pub reference_delta: u64,
-    pub emulated_delta: u64,
+    pub ref_ts: u64,
+    pub emu_ts: u64,
     pub event: EventKind,
 }
