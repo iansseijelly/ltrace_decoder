@@ -1,0 +1,42 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/interesting_profile/spec17-intspeed-traced-wave1-602.gcc_s.out",
+ "user_binaries": [
+  {
+   "binary": "../spec2017/speckle/build/overlay/intspeed/test/602.gcc_s/sgcc_base.riscv-64",
+   "asids": [
+    117
+   ]
+  }
+ ],
+ "machine_binary": "../firemarshal/images/firechip/spec17-intspeed-test-602-602.gcc_s/spec17-intspeed-test-602-602.gcc_s-bin",
+ "kernel_binary": "../firemarshal/images/firechip/spec17-intspeed-test-602-602.gcc_s/spec17-intspeed-test-602-602.gcc_s-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-20--06-42-57-spec-chores/spec-chores-run-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "../firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+   "0xffffffff01b08000"
+  ],
+  [
+   "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+   "0xffffffff01b88000"
+  ]
+ ],
+ "receivers": {
+  "bb_pair_stats": {
+   "enabled": true,
+   "path": "trace.gcc.pair-study.golden.bb_pair_stats.csv"
+  }
+ },
+ "emulations": [
+  {
+   "name": "tnt_cyc_retcompressed",
+   "format": "tnt_cyc_retcompressed",
+   "lim_tnt": 47,
+   "receivers": {
+    "bb_pair_stats": {
+     "path": "trace.gcc.pair-study.tnt_cyc_retcompressed.bb_pair_stats.csv"
+    }
+   }
+  }
+ ]
+}

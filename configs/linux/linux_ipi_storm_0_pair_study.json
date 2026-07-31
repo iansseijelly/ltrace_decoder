@@ -1,0 +1,53 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/interesting_profile/ipi_storm.tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "../firemarshal/example-workloads/ipi-storm/overlay/root/ipi-storm/trace-submit",
+   "asids": [
+    106,
+    107
+   ]
+  },
+  {
+   "binary": "../firemarshal/example-workloads/ipi-storm/overlay/root/ipi-storm/hello",
+   "asids": [
+    108
+   ]
+  }
+ ],
+ "machine_binary": "../firemarshal/images/firechip/ipi-storm/ipi-storm-bin",
+ "kernel_binary": "../firemarshal/images/firechip/ipi-storm/ipi-storm-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-03-29--21-38-08-ipi-storm/ipi-storm-run-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "../firemarshal/images/firechip/ipi-storm/tacit-dwarf",
+   "0xffffffff01b08000"
+  ],
+  [
+   "../firemarshal/images/firechip/ipi-storm/iceblk-dwarf",
+   "0xffffffff01b88000"
+  ]
+ ],
+ "receivers": {
+  "bb_stats": {
+   "enabled": true,
+   "path": "trace.ipi0.pair-study.golden.bb_stats.csv"
+  },
+  "bb_pair_stats": {
+   "enabled": true,
+   "path": "trace.ipi0.pair-study.golden.bb_pair_stats.csv"
+  }
+ },
+ "emulations": [
+  {
+   "name": "tnt_cyc_retcompressed",
+   "format": "tnt_cyc_retcompressed",
+   "lim_tnt": 47,
+   "receivers": {
+    "bb_pair_stats": {
+     "path": "trace.ipi0.pair-study.tnt_cyc_retcompressed.bb_pair_stats.csv"
+    }
+   }
+  }
+ ]
+}
