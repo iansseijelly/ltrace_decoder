@@ -15,6 +15,9 @@ use std::io::{BufWriter, Write};
    arbitrary chain depth. Traps/syncs reset the tracked handler. */
 pub struct DispatchStatsReceiver {
     writer: BufWriter<File>,
+    seq_writer: Option<BufWriter<File>>,
+    seq_limit: u64,
+    seq_written: u64,
     receiver: BusReceiver,
     handlers: HashSet<u64>,
     // (from_handler, to_handler) -> entry-block intervals
@@ -27,9 +30,17 @@ pub struct DispatchStatsReceiver {
 }
 
 impl DispatchStatsReceiver {
-    pub fn new(bus_rx: BusReader<Entry>, path: String, handlers: HashSet<u64>) -> Self {
+    pub fn new(bus_rx: BusReader<Entry>, path: String, handlers: HashSet<u64>,
+               seq_path: Option<String>, seq_limit: u64) -> Self {
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
+            seq_writer: seq_path.map(|p| {
+                let mut w = BufWriter::new(File::create(p).unwrap());
+                w.write_all(b"timestamp,to_handler\n").unwrap();
+                w
+            }),
+            seq_limit,
+            seq_written: 0,
             receiver: BusReceiver {
                 name: "dispatch_stats".to_string(),
                 bus_rx,
@@ -65,6 +76,12 @@ impl DispatchStatsReceiver {
         // does the next BB enter a handler?
         if self.handlers.contains(&to_addr) {
             self.pending = Some((to_addr, timestamp, self.curr_handler));
+            if self.seq_written < self.seq_limit {
+                if let Some(ref mut w) = self.seq_writer {
+                    w.write_all(format!("{},{:#x}\n", timestamp, to_addr).as_bytes()).unwrap();
+                    self.seq_written += 1;
+                }
+            }
         }
         self.prev_addr = to_addr;
     }
@@ -80,6 +97,8 @@ pub fn factory(
         .and_then(|value| value.as_str())
         .unwrap_or("trace.dispatch_stats.csv")
         .to_string();
+    let seq_path = config.get("seq_path").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let seq_limit = config.get("seq_limit").and_then(|v| v.as_u64()).unwrap_or(0);
     let handlers: HashSet<u64> = config
         .get("handlers")
         .and_then(|value| value.as_array())
@@ -90,7 +109,7 @@ pub fn factory(
             u64::from_str_radix(s.trim_start_matches("0x"), 16).expect("bad handler address")
         })
         .collect();
-    Box::new(DispatchStatsReceiver::new(bus_rx, path, handlers))
+    Box::new(DispatchStatsReceiver::new(bus_rx, path, handlers, seq_path, seq_limit))
 }
 
 crate::register_receiver!("dispatch_stats", factory);
@@ -139,6 +158,9 @@ impl AbstractReceiver for DispatchStatsReceiver {
     }
 
     fn _flush(&mut self) {
+        if let Some(ref mut w) = self.seq_writer {
+            w.flush().unwrap();
+        }
         self.writer
             .write_all(b"count,mean,min,p50,p90,p99,max,netvar,from_handler,to_handler\n")
             .unwrap();
