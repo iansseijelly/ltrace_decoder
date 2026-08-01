@@ -1,0 +1,121 @@
+{
+ "encoded_trace": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-01--01-12-07-lua-dispatch/lua-dispatch-lua-sieve-traced/tacit0.out",
+ "user_binaries": [
+  {
+   "binary": "../firemarshal/example-workloads/lua-dispatch/overlay/root/lua-dispatch/lua",
+   "asids": [
+    107
+   ]
+  },
+  {
+   "binary": "../firemarshal/example-workloads/lua-dispatch/overlay/root/lua-dispatch/trace-run",
+   "asids": [
+    106
+   ]
+  }
+ ],
+ "machine_binary": "../firemarshal/images/firechip/lua-dispatch-lua-sieve-traced/lua-dispatch-lua-sieve-traced-bin",
+ "kernel_binary": "../firemarshal/images/firechip/lua-dispatch-lua-sieve-traced/lua-dispatch-lua-sieve-traced-bin-dwarf",
+ "kernel_jump_label_patch_log": "/scratch/iansseijelly/tacit-chipyard/sims/firesim/deploy/results-workload/2026-08-01--01-12-07-lua-dispatch/lua-dispatch-lua-chores/jump_label_patch_map.txt",
+ "driver_binary_entry_tuples": [
+  [
+   "../firemarshal/boards/firechip/drivers/tacit-driver/tacit.o",
+   "0xffffffff01b08000"
+  ],
+  [
+   "../firemarshal/boards/firechip/drivers/iceblk-driver/iceblk.o",
+   "0xffffffff01b88000"
+  ]
+ ],
+ "receivers": {
+  "dispatch_stats": {
+   "enabled": true,
+   "path": "trace.lua-sieve.dispatch_stats.csv",
+   "handlers": [
+    "0x1f92e",
+    "0x1f968",
+    "0x1f9d0",
+    "0x1f9f8",
+    "0x1fa26",
+    "0x1fa6e",
+    "0x1facc",
+    "0x1faee",
+    "0x1fb42",
+    "0x1fb72",
+    "0x1fbbc",
+    "0x1fc58",
+    "0x1fc98",
+    "0x1fcca",
+    "0x1fd36",
+    "0x1fd68",
+    "0x1fd94",
+    "0x1fe40",
+    "0x1ff18",
+    "0x1ff6e",
+    "0x1ff9a",
+    "0x1ffec",
+    "0x20028",
+    "0x20064",
+    "0x200ac",
+    "0x20118",
+    "0x2018a",
+    "0x201ce",
+    "0x20274",
+    "0x202cc",
+    "0x202f0",
+    "0x203ac",
+    "0x20402",
+    "0x20464",
+    "0x204ba",
+    "0x2052a",
+    "0x20582",
+    "0x205b4",
+    "0x205e0",
+    "0x2060e",
+    "0x20668",
+    "0x206ba",
+    "0x206fa",
+    "0x20754",
+    "0x2078c",
+    "0x207c2",
+    "0x20800",
+    "0x2082a",
+    "0x20874",
+    "0x208e0",
+    "0x20934",
+    "0x2099e",
+    "0x20a00",
+    "0x20a52",
+    "0x20ab8",
+    "0x20aee",
+    "0x20b3c",
+    "0x20ba2",
+    "0x20c22",
+    "0x20c80",
+    "0x20c9e",
+    "0x20cde",
+    "0x20d10",
+    "0x20d5e",
+    "0x20dbe",
+    "0x20e12",
+    "0x20e90",
+    "0x20ee8",
+    "0x20f50",
+    "0x20fa4",
+    "0x20ff8",
+    "0x21048",
+    "0x21098",
+    "0x21100",
+    "0x2111e",
+    "0x2114c",
+    "0x21158",
+    "0x21184",
+    "0x2120a",
+    "0x21236",
+    "0x212a6",
+    "0x21310",
+    "0x21386"
+   ]
+  }
+ }
+}
