@@ -22,7 +22,8 @@ def parse_listing(path):
     for line in open(path):
         m = re.match(r'^(main|function) <(.+):(\d+),(\d+)> \((\d+) instruction', line)
         if m:
-            cur = dict(kind=m.group(1), src=f"{m.group(3)},{m.group(4)}", insns={})
+            cur = dict(kind=m.group(1), src=f"{m.group(3)},{m.group(4)}",
+                       linedefined=int(m.group(3)), insns={})
             protos.append(cur)
             continue
         m = re.match(r'^\t(\d+)\t\[(\d+)\]\t(\w+)\s*\t?([^;]*)(?:; (.*))?$', line.rstrip())
@@ -37,6 +38,74 @@ def parse_listing(path):
     return protos
 
 
+class Speedscope:
+    """Evented speedscope profile: proto frames > line frames > [C] leaves."""
+    def __init__(self, path, names, limit):
+        self.path, self.names, self.limit = path, names, limit
+        self.frames = {}      # label -> idx
+        self.events = []
+        self.stack = []       # open frame idx stack
+        self.line_open = []   # per proto-frame: open line frame idx or None
+        self.start = None
+
+    def fidx(self, label):
+        if label not in self.frames:
+            self.frames[label] = len(self.frames)
+        return self.frames[label]
+
+    def _ev(self, kind, idx, ts):
+        self.events.append((kind, idx, ts))
+
+    def open_proto(self, ts, pname):
+        if self.start is None:
+            self.start = ts
+        i = self.fidx(pname)
+        self._ev('O', i, ts); self.stack.append(i); self.line_open.append(None)
+
+    def rotate_line(self, ts, pname, line):
+        if not self.stack:
+            return
+        want = self.fidx(f"{pname}:{line}")
+        cur = self.line_open[-1]
+        if cur == want:
+            return
+        if cur is not None:
+            self._ev('C', cur, ts)
+        self._ev('O', want, ts)
+        self.line_open[-1] = want
+
+    def close_proto(self, ts):
+        if self.line_open and self.line_open[-1] is not None:
+            self._ev('C', self.line_open[-1], ts)
+        if self.stack:
+            self._ev('C', self.stack.pop(), ts)
+            self.line_open.pop()
+
+    def ccall(self, ts0, ts1, label):
+        i = self.fidx(label)
+        self._ev('O', i, ts0); self._ev('C', i, ts1)
+
+    def full(self):
+        return len(self.events) >= self.limit
+
+    def finish(self, ts):
+        while self.stack:
+            self.close_proto(ts)
+        frames = [None] * len(self.frames)
+        for label, i in self.frames.items():
+            frames[i] = label
+        with open(self.path, 'w') as f:
+            f.write('{"version":"0.0.1",'
+                    '"$schema":"https://www.speedscope.app/file-format-schema.json",'
+                    '"shared":{"frames":[')
+            f.write(','.join('{"name":' + json.dumps(n) + '}' for n in frames))
+            f.write(']},"profiles":[{"name":"lua guest","type":"evented","unit":"none",')
+            f.write(f'"startValue":{self.start},"endValue":{ts},"events":[')
+            f.write(','.join(f'{{"type":"{k}","frame":{i},"at":{t}}}'
+                             for k, i, t in self.events))
+            f.write(']}]}')
+
+
 class Walker:
     def __init__(self, protos, seq_ops):
         self.protos = protos
@@ -48,6 +117,8 @@ class Walker:
         self.max_look = 0
         self.mismatch = None
         self.calls_resolved = 0
+        self.ss = None
+        self.pnames = []
 
     def op_at(self, p, pc):
         ins = self.protos[p]['insns'].get(pc)
@@ -133,6 +204,8 @@ class Walker:
             self.mismatch = (0, f"first op {op0} != proto start {self.op_at(start_proto,1)}")
             return
         self.stack = [[start_proto, 1, 0]]
+        if self.ss:
+            self.ss.open_proto(ts0, self.pnames[start_proto])
         while self.i < len(self.seq) - 1:
             p, pc, _ = self.stack[-1]
             ln, op, _t = self.protos[p]['insns'][pc]
@@ -156,16 +229,30 @@ class Walker:
             if kind == 'exit':
                 self.mismatch = (self.i, "guest program exited")
                 return
+            ts_now, ts_next = self.seq[self.i][0], self.seq[self.i + 1][0]
+            if self.ss:
+                self.ss.rotate_line(ts_now, self.pnames[p], ln)
+                if kind == 'ccall':
+                    self.ss.ccall(ts_now, ts_next, f"[C] call @{self.pnames[p]}:{ln}")
             if kind == 'call':
                 self.calls_resolved += 1
                 self.stack[-1][2] = ncall
                 self.stack.append([np, npc, 0])
+                if self.ss:
+                    self.ss.open_proto(ts_next, self.pnames[np])
             elif kind == 'ret':
                 self.stack.pop()
                 self.stack[-1][1] = npc
+                if self.ss:
+                    self.ss.close_proto(ts_next)
             else:
                 self.stack[-1][1] = npc
             self.i += 1
+            if self.ss and self.ss.full():
+                self.ss.finish(ts_next)
+                print(f"speedscope: event budget reached at seq[{self.i}] "
+                      f"(ts {ts_next}); profile written")
+                self.ss = None
 
 
 def main():
@@ -181,8 +268,25 @@ def main():
     print(f"protos: {len(protos)} ({[len(p['insns']) for p in protos]} insns), "
           f"sequence: {len(seq):,} handler visits")
 
+    src_lines = open('../lua-dispatch/bench/nbody.lua').readlines()
+    names = []
+    for k, pr in enumerate(protos):
+        ld = pr.get('linedefined', 0)
+        nm = 'main'
+        if ld and ld - 1 < len(src_lines):
+            mm = re.search(r'(?:local\s+)?function\s+([\w.:]+)', src_lines[ld - 1])
+            if mm:
+                nm = mm.group(1)
+            else:
+                nm = f'fn@{ld}'
+        names.append(f"{nm} <nbody.lua:{ld}>" if k else "main <nbody.lua>")
     w = Walker(protos, seq)
+    w.pnames = names
+    if len(sys.argv) > 4:
+        w.ss = Speedscope(sys.argv[4], names, limit=2_000_000)
     w.run()
+    if w.ss:
+        w.ss.finish(w.seq[min(w.i, len(w.seq) - 1)][0])
     walked = w.i + 1
     print(f"walked: {walked:,}/{len(seq):,} ({walked/len(seq)*100:.2f}%)")
     print(f"ambiguities unresolved: {w.ambig}, max lookahead used: {w.max_look}, "
