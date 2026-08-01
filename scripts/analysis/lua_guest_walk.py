@@ -9,6 +9,7 @@ Usage: lua_guest_walk.py <luac_listing.txt> <dispatch_seq.csv> <optab.json>
 import json
 import re
 import sys
+from array import array
 from collections import defaultdict
 
 CMP_OPS = {'EQ', 'LT', 'LE', 'EQK', 'EQI', 'LTI', 'LEI', 'GTI', 'GEI', 'TEST', 'TESTSET'}
@@ -113,6 +114,7 @@ class Walker:
         self.i = 0                  # position in seq
         self.stack = []             # frames: [proto_idx, pc, call_pc]
         self.attr = defaultdict(int)  # (proto_idx, line) -> cycles
+        self.dist = defaultdict(lambda: array('q'))  # (proto_idx, pc) -> intervals
         self.ambig = 0
         self.max_look = 0
         self.mismatch = None
@@ -215,6 +217,7 @@ class Walker:
                 return
             dt = self.seq[self.i + 1][0] - self.seq[self.i][0]
             self.attr[(p, ln)] += dt
+            self.dist[(p, pc)].append(dt)
             cands = self.successors(p, pc)
             if len(cands) > 1:
                 pre = len(cands)
@@ -282,7 +285,7 @@ def main():
         names.append(f"{nm} <nbody.lua:{ld}>" if k else "main <nbody.lua>")
     w = Walker(protos, seq)
     w.pnames = names
-    if len(sys.argv) > 4:
+    if len(sys.argv) > 4 and sys.argv[4] != '-':
         w.ss = Speedscope(sys.argv[4], names, limit=2_000_000)
     w.run()
     if w.ss:
@@ -297,6 +300,18 @@ def main():
         ctx = ' '.join(op for _, op in seq[max(0,i-6):i+6])
         print(f"  context: ...{ctx}...")
 
+    if len(sys.argv) > 5:
+        import numpy as np
+        with open(sys.argv[5], 'w') as f:
+            f.write("proto,pc,op,line,count,total,min,p50,p90,p99,max,netvar\n")
+            for (p_, pc_), arr in sorted(w.dist.items()):
+                a = np.frombuffer(arr, dtype=np.int64)
+                ln_, op_, _ = w.protos[p_]['insns'][pc_]
+                q = np.percentile(a, [50, 90, 99])
+                f.write(f"{p_},{pc_},{op_},{ln_},{len(a)},{a.sum()},{a.min()},"
+                        f"{q[0]:.0f},{q[1]:.0f},{q[2]:.0f},{a.max()},"
+                        f"{a.sum()-int(a.min())*len(a)}\n")
+        print(f"per-bytecode distribution written to {sys.argv[5]} ({len(w.dist)} pcs)")
     total = sum(w.attr.values())
     print(f"\n== guest-line cycle attribution (walked prefix, {total:,} cycles) ==")
     src = open('../lua-dispatch/bench/nbody.lua').readlines()
