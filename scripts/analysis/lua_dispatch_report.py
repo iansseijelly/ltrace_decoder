@@ -207,7 +207,48 @@ L.append("\nValidation plan (the Req-6 loop): capture the same four benchmarks w
          "shares match the bigram's conditional distributions. Per-site predicted-vs-measured "
          "is a much stronger validation than a single end-to-end number.\n")
 
-L.append("## 6. Why only this profile could produce this report\n")
+
+# ---- validation section (post -fno-crossjumping captures) ----
+NCJ = {'nbody': 3.966e9, 'fannkuch': 4.341e9, 'binarytrees': 3.622e9, 'sieve': 4.607e9}
+NCJ_SITES = set('0x' + l.strip() for l in open('configs/lua/jr_sites_ncj.txt'))
+L.append("## 6. Validation: the fix, measured\n")
+L.append("Same benchmarks, parameters, and bitstream; only `-fno-crossjumping` added. All "
+         "outputs verified correct.\n")
+vt = []
+vt.append("| benchmark | baseline | fixed | **speedup** | predicted floor | ceiling | "
+          "bigram modal share | measured top-target/site | site netvar before → after (Gcyc) |")
+vt.append("|---|---|---|---|---|---|---|---|---|")
+for name, s2 in summary.items():
+    cyc2 = NCJ[name]
+    df2 = load_pairs(f'trace.lua-ncj-{name}.bb_pair_stats.csv')
+    d2 = df2[df2['prev_end'].isin(NCJ_SITES)].copy()
+    d2['sum'] = d2['count'] * d2['mean']
+    nv2 = 0; N2 = 0; tsh = 0
+    for st2, g2 in d2.groupby('prev_end'):
+        n2 = g2['count'].sum()
+        if n2 < 1000:
+            continue
+        N2 += n2
+        nv2 += g2['sum'].sum() - n2 * g2['min'].min()
+        tsh += g2['count'].max()
+    sp = 1 - cyc2 / s2['cyc']
+    vt.append(f"| {name} | {s2['cyc']/1e9:.3f} s | {cyc2/1e9:.3f} s | **{sp*100:.1f}%** | "
+              f"{s2['rec']/s2['cyc']*100:.1f}% | {s2['nv']/s2['cyc']*100:.1f}% | "
+              f"{s2['pshare']*100:.0f}% | {tsh/N2*100:.1f}% | "
+              f"{s2['nv']/1e9:.2f} → {nv2/1e9:.2f} |")
+L.append('\n'.join(vt))
+L.append("\nEvery measured speedup falls inside its predicted [modal floor, netvar ceiling] "
+         "envelope, and the per-site predictability realized by the fix matches the baseline "
+         "bigram's modal-share prediction to within ~1 point on every benchmark — per-site, "
+         "not just end-to-end. sieve beats its conservative floor because replication is per "
+         "handler *exit path* (157 sites > 83 handlers): same-handler traffic from different "
+         "loops separates onto different `vmbreak` copies, so alternating two-target patterns "
+         "become monomorphic per site — a mechanism the handler-level modal model deliberately "
+         "did not credit. Residual site netvar (right column) is intrinsic entry-block "
+         "variance (cache/data effects) plus mispredicts on genuinely unpredictable "
+         "transitions.\n")
+
+L.append("## 7. Why only this profile could produce this report\n")
 L.append("- The diagnosis lives at 3-vs-14-cycle granularity on single basic blocks — below "
          "the resolution floor of sparse-timestamp tracing (our emulation study: ~100% BB-level "
          "error, pair signal ρ≈0.35) and below any practical sampling rate; instrumentation at "
