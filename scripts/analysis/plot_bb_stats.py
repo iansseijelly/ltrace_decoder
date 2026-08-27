@@ -1,9 +1,9 @@
 import matplotlib
 import matplotlib.pyplot as plt
-plt.style.use('seaborn-v0_8-colorblind')
-plt.rc('font', family='serif')
-plt.rc('font', serif='Latin Modern Roman')
-matplotlib.rcParams.update({'font.size': 18})
+# plt.style.use('seaborn-v0_8-colorblind')
+# plt.rc('font', family='serif')
+# plt.rc('font', serif='Latin Modern Roman')
+matplotlib.rcParams.update({'font.size': 16})
 import pandas as pd
 import numpy as np
 import os
@@ -50,7 +50,7 @@ def load_data(base_dir):
 
 def plot_top_netvar_tc_stacked(data, outpath):
     """Stacked bar chart: top 10 netvar BBs as % of total cycles per benchmark."""
-    fig, ax = plt.subplots(figsize=(14, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     names = list(data.keys())
     n = len(names)
@@ -100,7 +100,7 @@ def plot_top_netvar_tc_stacked(data, outpath):
 
 def plot_top_netvar_tn_stacked(data, outpath):
     """Stacked bar chart: top 10 netvar BBs as % of total cycles per benchmark."""
-    fig, ax = plt.subplots(figsize=(14, 6))
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     names = list(data.keys())
     n = len(names)
@@ -217,6 +217,36 @@ def plot_rank_comparison(data, outpath):
     print(f"Saved {outpath}", file=sys.stderr)
 
 
+def plot_overlap(data, outpath):
+    """Bar chart: number of overlapping BBs between top-10 netvar and top-10 total rankings."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    names = list(data.keys())
+    n = len(names)
+    x = range(n)
+
+    overlaps = []
+    for name in names:
+        netvar_bbs = set(data[name]["netvar"]["bb"])
+        total_bbs = set(data[name]["total"]["bb"])
+        overlaps.append(len(netvar_bbs & total_bbs))
+
+    bars = ax.bar(x, overlaps, color="#4c72b0", edgecolor="white", linewidth=0.3)
+    for i, v in enumerate(overlaps):
+        ax.text(i, v + 0.15, str(v), ha="center", va="bottom")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=35, ha="right")
+    ax.set_ylabel("Overlapping BBs")
+    ax.set_title("Top 10 Overlap: Netvar vs Total Time Rankings")
+    ax.set_ylim(0, 11)
+    ax.axhline(y=10, color="gray", linewidth=0.5, linestyle="--")
+    fig.tight_layout()
+    fig.savefig(outpath, dpi=150)
+    plt.close(fig)
+    print(f"Saved {outpath}", file=sys.stderr)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot BB stats across benchmarks")
     parser.add_argument("--indir", required=True, help="Base directory with per-benchmark subdirs")
@@ -229,3 +259,4 @@ if __name__ == "__main__":
     plot_top_netvar_tc_stacked(data, os.path.join(args.outdir, "top_netvar_tc_share.png"))
     plot_top_netvar_tn_stacked(data, os.path.join(args.outdir, "top_netvar_tn_share.png"))
     plot_rank_comparison(data, os.path.join(args.outdir, "netvar_vs_total_rank.png"))
+    plot_overlap(data, os.path.join(args.outdir, "netvar_vs_total_overlap.png"))

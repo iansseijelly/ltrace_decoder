@@ -121,6 +121,9 @@ class Walker:
         self.calls_resolved = 0
         self.ss = None
         self.pnames = []
+        self.probe_pcs = set()   # {(proto,pc)} to dump per-instance
+        self.probe_rows = []
+        self.probe_cap = 300000
 
     def op_at(self, p, pc):
         ins = self.protos[p]['insns'].get(pc)
@@ -233,6 +236,8 @@ class Walker:
                 self.mismatch = (self.i, "guest program exited")
                 return
             ts_now, ts_next = self.seq[self.i][0], self.seq[self.i + 1][0]
+            if (p, pc) in self.probe_pcs and len(self.probe_rows) < self.probe_cap:
+                self.probe_rows.append((p, pc, self.i, dt, kind))
             if self.ss:
                 self.ss.rotate_line(ts_now, self.pnames[p], ln)
                 if kind == 'ccall':
