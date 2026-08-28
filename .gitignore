@@ -21,3 +21,9 @@ target-rust-analyzer/
 # Trace bundles: multi-GB captures assembled by scripts/analysis/bundle_run.py.
 # Archived to s3://tacit-trace-bin-bundle/tacit/ -- see bundles/INDEX.md.
 bundles/
+
+# Written by scripts/analysis/gen_lua_ncj_configs.py from lua_optab_ncj.json;
+# the results dir is passed in, so regenerate rather than commit these.
+# lua_ncj_nbody_seq.json is hand-maintained, not generated.
+configs/lua/lua_ncj_*.json
+!configs/lua/lua_ncj_nbody_seq.json
