@@ -7,11 +7,57 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use rusqlite::Connection;
 
-/// Per-BB aggregation: (count, sum_delta, min_delta)
+/// Per-BB aggregation: exact aggregates plus every observed delta.
+///
+/// `min` is NOT a reachable floor. Measured on leela `uct_select_child`
+/// (2026-07-31): min=3 but p50=110, because the block holds four non-pipelined
+/// dependent `divw` (~100 cyc of irreducible arithmetic) and an OoO core can
+/// occasionally retire the whole block in ~3 cycles when the divide chain
+/// completed under an older instruction's cache miss. netvar = sum - min*count
+/// then counted ~112 cyc/execution as "recoverable" when only ~5 cyc (the
+/// memory component) actually was -- a ~23x overstatement. A percentile floor
+/// gives a reachable baseline; see netvar_pK below.
+///
+/// Every delta is retained rather than bucketed, for two reasons: the stall
+/// totals stay exact (a bucketed tail silently under-counts long stalls -- the
+/// mcf trace has a 2.3M-cycle delta), and `percentile` can use the same
+/// definition as the streaming receivers in
+/// src/receivers/analysis/*_stats_receiver.rs, so the offline tool and the
+/// receivers cannot drift apart. Cost is ~8 B per execution: ~18 MB for the
+/// 2.2M deltas in the mcf trace.
 struct BbAgg {
     count: u64,
     sum: u64,
     min: u64,
+    /// Every observed delta. Unordered until `sort_deltas` is called; both
+    /// `percentile` and `netvar_above` require that to have happened.
+    deltas: Vec<u64>,
+}
+
+impl BbAgg {
+    fn sort_deltas(&mut self) {
+        self.deltas.sort_unstable();
+    }
+
+    /// Percentile by linear index into the sorted deltas. This is deliberately
+    /// the same formula as bb_stats_receiver / bb_pair_stats_receiver /
+    /// dispatch_stats_receiver so that offline and streaming results agree.
+    fn percentile(&self, frac: f64) -> u64 {
+        let n = self.deltas.len();
+        if n == 0 {
+            return 0;
+        }
+        let idx = (((n as f64 - 1.0) * frac).round() as usize).min(n - 1);
+        self.deltas[idx]
+    }
+
+    /// Recoverable stall above a floor: sum over executions of max(0, t - floor).
+    /// Exact. With floor == min this is identical to `sum - min * count`.
+    fn netvar_above(&self, floor: u64) -> u64 {
+        // ascending order: skip the prefix at or below the floor
+        let start = self.deltas.partition_point(|&d| d <= floor);
+        self.deltas[start..].iter().map(|&d| d - floor).sum()
+    }
 }
 
 /// Flattened result row: (count, mean, netvar, total, bb_start, bb_end)
@@ -79,12 +125,14 @@ pub fn run(db_path: &str, outdir: &str, prv: Option<i64>, ctx: Option<i64>, limi
                     count: 0,
                     sum: 0,
                     min: u64::MAX,
+                    deltas: Vec::new(),
                 });
                 agg.count += 1;
                 agg.sum += delta;
                 if delta < agg.min {
                     agg.min = delta;
                 }
+                agg.deltas.push(delta);
             }
         }
 
@@ -98,6 +146,53 @@ pub fn run(db_path: &str, outdir: &str, prv: Option<i64>, ctx: Option<i64>, limi
         }
     }
     pb.finish_and_clear();
+
+    // Percentile-floor table: one row per BB with every floor side by side, so the
+    // ranking under `min` can be compared directly against reachable floors.
+    {
+        let pct_path = outdir.join("bb_stats_pct.csv");
+        let mut pf = File::create(&pct_path)
+            .with_context(|| format!("Failed to create: {}", pct_path.display()))?;
+        writeln!(
+            pf,
+            "count,mean,total,min,p1,p5,p25,p50,netvar_min,netvar_p1,netvar_p5,netvar_p25,netvar_p50,bb"
+        )?;
+        let mut pct_rows: Vec<(u64, u64, String)> = Vec::with_capacity(bb_agg.len());
+        for (&(bb_start, bb_end), agg) in bb_agg.iter_mut() {
+            agg.sort_deltas();
+            let mean = agg.sum as f64 / agg.count as f64;
+            let (p1, p5, p25, p50) = (
+                agg.percentile(0.01),
+                agg.percentile(0.05),
+                agg.percentile(0.25),
+                agg.percentile(0.50),
+            );
+            // Stated in the closed form so the match with top_by_netvar.csv and
+            // with the receivers is obvious; netvar_above(min) is identical.
+            let nv_min = agg.sum - agg.min * agg.count;
+            debug_assert_eq!(
+                nv_min,
+                agg.netvar_above(agg.min),
+                "netvar_above(min) must equal sum - min*count"
+            );
+            let line = format!(
+                "{},{:.1},{},{},{},{},{},{},{},{},{},{},{},{:#x}-{:#x}",
+                agg.count, mean, agg.sum, agg.min, p1, p5, p25, p50,
+                nv_min,
+                agg.netvar_above(p1),
+                agg.netvar_above(p5),
+                agg.netvar_above(p25),
+                agg.netvar_above(p50),
+                bb_start, bb_end
+            );
+            pct_rows.push((nv_min, agg.sum, line));
+        }
+        pct_rows.sort_by(|a, b| b.0.cmp(&a.0));
+        for (_, _, line) in &pct_rows {
+            writeln!(pf, "{line}")?;
+        }
+        eprintln!("Written {} rows to {}", pct_rows.len(), pct_path.display());
+    }
 
     // Build full results: (count, mean, netvar, total, bb_start, bb_end)
     let mut results: Vec<BbRow> = bb_agg
