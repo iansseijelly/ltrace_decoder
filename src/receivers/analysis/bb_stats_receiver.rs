@@ -195,24 +195,38 @@ impl AbstractReceiver for BBStatsReceiver {
 
     fn _flush(&mut self) {
         // write the header
-        self.writer.write_all(b"count,mean,netvar,bb\n").unwrap();
-        for (bb, intervals) in self.bb_records.iter() {
+        self.writer
+            .write_all(b"count,mean,min,p50,p90,p99,max,netvar,bb\n")
+            .unwrap();
+        for (bb, intervals) in self.bb_records.iter_mut() {
             if intervals.is_empty() {
                 continue;
             }
 
             // Calculate mean manually
             let sum: u64 = intervals.iter().sum();
-            let min = intervals.iter().min().unwrap();
             let mean = sum as f64 / intervals.len() as f64;
             let count = intervals.len();
+
+            // Percentiles (sort in place; vecs already held in RAM)
+            intervals.sort_unstable();
+            let min = intervals[0];
+            let pct = |p: f64| -> u64 {
+                let idx = (((count as f64 - 1.0) * p).round() as usize).min(count - 1);
+                intervals[idx]
+            };
+            let p50 = pct(0.50);
+            let p90 = pct(0.90);
+            let p99 = pct(0.99);
+            let max = intervals[count - 1];
             let netvar = sum - min * count as u64;
 
             self.writer
                 .write_all(
                     format!(
-                        "{}, {}, {}, {:#x}-{:#x}\n",
-                        count, mean, netvar, bb.start_addr, bb.end_addr,
+                        "{}, {}, {}, {}, {}, {}, {}, {}, {:#x}-{:#x}\n",
+                        count, mean, min, p50, p90, p99, max, netvar,
+                        bb.start_addr, bb.end_addr,
                     )
                     .as_bytes(),
                 )
