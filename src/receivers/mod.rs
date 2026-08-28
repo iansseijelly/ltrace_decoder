@@ -15,6 +15,8 @@ pub mod prv_breakdown_receiver;
 pub mod iteration_breakdown_receiver;
 #[path = "analysis/func_path_receiver.rs"]
 pub mod func_path_receiver;
+#[path = "analysis/perfect_sampler_receiver.rs"]
+pub mod perfect_sampler_receiver;
 
 #[path = "print/speedscope_receiver.rs"]
 pub mod speedscope_receiver;
