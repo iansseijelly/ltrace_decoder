@@ -103,6 +103,8 @@ fn step_bb(
     br_mode: &BrMode,
     decoder_cache: &mut DecoderCache,
     insn_count: &mut u64,
+    prv: Prv,
+    ctx: u64,
 ) -> u64 {
     let initial_pc = pc;
     let mut pc = pc;
@@ -114,7 +116,12 @@ fn step_bb(
     let mut num_instructions = 0;
     loop {
         trace!("stepping bb pc: {:x}", pc);
-        let insn = insn_map.get(&pc).unwrap();
+        let insn = insn_map.get(&pc).unwrap_or_else(|| {
+            panic!(
+                "step_bb: pc {:#x} not found in instruction map (prv: {:?}, ctx: {}, bb start: {:#x})",
+                pc, prv, ctx, initial_pc
+            )
+        });
         // bus.broadcast(Entry::instruction(insn, pc));
         num_instructions += 1;
         if stop_on_ij {
@@ -151,13 +158,21 @@ fn step_bb_until(
     target_pc: u64,
     bus: &mut Bus<Entry>,
     insn_count: &mut u64,
+    prv: Prv,
+    ctx: u64,
 ) -> u64 {
     debug!("stepping bb from pc: {:x} until pc: {:x}", pc, target_pc);
+    let initial_pc = pc;
     let mut pc = pc;
     let mut num_instructions = 0;
     loop {
         trace!("stepping bb pc: {:x}", pc);
-        let insn = insn_map.get(&pc).unwrap();
+        let insn = insn_map.get(&pc).unwrap_or_else(|| {
+            panic!(
+                "step_bb_until: pc {:#x} not found in instruction map (prv: {:?}, ctx: {}, bb start: {:#x}, target_pc: {:#x})",
+                pc, prv, ctx, initial_pc, target_pc
+            )
+        });
         // bus.broadcast(Entry::instruction(insn, pc));
         num_instructions += 1;
         if insn.is_branch() || insn.is_direct_jump() {
@@ -262,6 +277,8 @@ pub fn decode_trace(
                 refund_addr(packet.target_address),
                 &mut bus,
                 &mut insn_count,
+                prv,
+                ctx,
             );
             pc.set_addr(new_pc);
             bus.broadcast(Entry::event(
@@ -280,6 +297,8 @@ pub fn decode_trace(
                     trapping_pc,
                     &mut bus,
                     &mut insn_count,
+                    prv,
+                    ctx,
                 );
                 assert!(
                     new_pc == trapping_pc,
@@ -352,6 +371,8 @@ pub fn decode_trace(
                     &br_mode,
                     &mut decoder_cache,
                     &mut insn_count,
+                    prv,
+                    ctx,
                 );
                 pc.set_addr(new_pc);
                 let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
@@ -390,6 +411,8 @@ pub fn decode_trace(
                 &br_mode,
                 &mut decoder_cache,
                 &mut insn_count,
+                prv,
+                ctx,
             );
             pc.set_addr(new_pc);
             let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
@@ -436,10 +459,20 @@ pub fn decode_trace(
                 &br_mode,
                 &mut decoder_cache,
                 &mut insn_count,
+                prv,
+                ctx,
             );
             pc.set_addr(new_pc);
             trace!("setting pc to: {:x}", pc.get_addr());
-            let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap();
+            let insn_to_resolve = curr_insn_map.get(&pc.get_addr()).unwrap_or_else(|| {
+                panic!(
+                    "resolve: pc {:#x} not found in instruction map (prv: {:?}, ctx: {}, f_header: {:?})",
+                    pc.get_addr(),
+                    prv,
+                    ctx,
+                    packet.f_header
+                )
+            });
             timestamp += packet.timestamp;
             match packet.f_header {
                 FHeader::FTb => {
