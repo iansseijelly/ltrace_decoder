@@ -17,3 +17,7 @@ target-rust-analyzer/
 *.csv
 *.png
 *.sqlite.db*
+
+# Trace bundles: multi-GB captures assembled by scripts/analysis/bundle_run.py.
+# Archived to s3://tacit-trace-bin-bundle/tacit/ -- see bundles/INDEX.md.
+bundles/
