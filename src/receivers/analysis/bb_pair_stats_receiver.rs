@@ -217,6 +217,24 @@ impl AbstractReceiver for BBPairStatsReceiver {
                 self.prev_timestamp = timestamp;
                 self.prev_bb = None;
             }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Pause { pause_pc },
+            } => {
+                // block and pair up to the paused instruction are exact
+                self.update_pair_records(pause_pc, pause_pc, timestamp);
+                self.prev_bb = None;
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Resume { pc, prv, ctx, .. },
+            } => {
+                self.curr_prv = prv;
+                self.curr_ctx = ctx;
+                self.prev_addr = pc;
+                self.prev_timestamp = timestamp;
+                self.prev_bb = None;
+            }
             _ => {}
         }
     }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use bus::Bus;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{debug, trace, warn};
@@ -13,8 +13,9 @@ use crate::frontend::bp_double_saturating_counter::BpDoubleSaturatingCounter;
 use crate::frontend::br_mode::BrMode;
 use crate::frontend::decoder_cache::{BasicBlockStats, DecoderCache};
 use crate::frontend::f_header::FHeader;
-use crate::frontend::packet::{read_first_packet, Packet, PacketReader};
+use crate::frontend::packet::{read_first_packet, runtime_cfg_from_start, Packet, PacketReader};
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
+use crate::frontend::sync_type::SyncType;
 use crate::frontend::trap_type::TrapType;
 
 use rustc_data_structures::fx::FxHashMap;
@@ -191,6 +192,54 @@ fn find_ctx(ctx: u64, valid_ctxs: &HashSet<u64>) -> bool {
     valid_ctxs.contains(&ctx)
 }
 
+/// Where the decoder is in the stream grammar:
+///
+/// ```text
+/// trace   := session+
+/// session := Start body ( Pause Resume body )* End
+/// body    := ( compressed | TB | NT | IJ | UJ | Trap )*
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StreamState {
+    /// Inside a session, control flow exact.
+    Body,
+    /// Between a Pause and its Resume: control flow unknown, time base continuous.
+    Gap { pause_ts: u64 },
+    /// After End: only EOF or a new Start may follow.
+    Ended,
+}
+
+/// Coverage accounting across sessions and gaps.
+#[derive(Debug, Default)]
+struct LossyStats {
+    sessions: u64,
+    gaps: u64,
+    gap_cycles: u64,
+    dropped_packets: u64,
+    session_cycles: u64,
+}
+
+impl LossyStats {
+    fn report(&self) {
+        println!("sessions: {}", self.sessions);
+        if self.gaps > 0 {
+            let covered = self.session_cycles.saturating_sub(self.gap_cycles);
+            let frac = if self.session_cycles > 0 {
+                covered as f64 / self.session_cycles as f64
+            } else {
+                0.0
+            };
+            println!("gaps: {}", self.gaps);
+            println!("gap cycles: {}", self.gap_cycles);
+            println!("dropped packets: {}", self.dropped_packets);
+            println!(
+                "covered cycles: {} / {} ({:.4})",
+                covered, self.session_cycles, frac
+            );
+        }
+    }
+}
+
 pub fn decode_trace(
     encoded_trace: String,
     static_cfg: DecoderStaticCfg,
@@ -233,6 +282,10 @@ pub fn decode_trace(
     let mut prv = first_packet.target_prv;
     let mut ctx = first_packet.target_ctx;
     let mut u_unknown_ctx = false;
+    let mut stream_state = StreamState::Body;
+    let mut session_start_ts = first_packet.timestamp;
+    let mut stats = LossyStats::default();
+    stats.sessions = 1;
 
     bus.broadcast(Entry::event(
         EventKind::sync_start(first_runtime_cfg, pc.get_addr(), prv, ctx),
@@ -251,9 +304,20 @@ pub fn decode_trace(
                     known_ctx_bytes_read += n;
                 }
             }
-            Err(_) => {
-                // panic!("error reading packet after reading {} bytes out of {} bytes", known_ctx_bytes_read, trace_file_size);
-                break;
+            Err(e) => {
+                let is_eof = e
+                    .downcast_ref::<std::io::Error>()
+                    .map(|io| io.kind() == std::io::ErrorKind::UnexpectedEof)
+                    .unwrap_or(false);
+                if is_eof {
+                    break;
+                }
+                bail!(
+                    "packet decode error after {} bytes (of {}): {}",
+                    bytes_read,
+                    trace_file_size,
+                    e
+                );
             }
         };
         if bytes_read.saturating_sub(last_progress_update) >= PROGRESS_UPDATE_STEP
@@ -270,23 +334,164 @@ pub fn decode_trace(
         let get_insn_map = |p: Prv, ctx: u64| -> &FxHashMap<u64, Insn> { insn_index.get(p, ctx) };
         let mut curr_insn_map = get_insn_map(prv, ctx);
 
-        if packet.f_header == FHeader::FSync {
-            let new_pc = step_bb_until(
-                pc.get_addr(),
-                curr_insn_map,
-                refund_addr(packet.target_address),
-                &mut bus,
-                &mut insn_count,
-                prv,
-                ctx,
+        if let Some(sync_type) = packet.sync_type() {
+            // walking is only possible in a context we have a binary for
+            let can_walk = !(u_unknown_ctx && prv == Prv::PrvUser);
+            match sync_type {
+                SyncType::SyncPause => {
+                    let StreamState::Body = stream_state else {
+                        bail!("Pause at {} while {:?}", packet.timestamp, stream_state);
+                    };
+                    let pause_pc = refund_addr(packet.target_address);
+                    if can_walk {
+                        let new_pc = step_bb_until(
+                            pc.get_addr(),
+                            curr_insn_map,
+                            pause_pc,
+                            &mut bus,
+                            &mut insn_count,
+                            prv,
+                            ctx,
+                        );
+                        if new_pc != pause_pc {
+                            // in BrPredict the walk passes through predicted branches,
+                            // so landing is advisory there
+                            if mode_is_predict {
+                                warn!("Pause: walked to {:#x}, packet says {:#x}", new_pc, pause_pc);
+                            } else {
+                                bail!(
+                                    "Pause: walked to {:#x} but packet says {:#x} (prv {:?}, ctx {})",
+                                    new_pc, pause_pc, prv, ctx
+                                );
+                            }
+                        }
+                    }
+                    pc.set_addr(pause_pc);
+                    // Pause carries the retire cycle of the first lost group, which is
+                    // at or after the last covered event; only monotonicity is checkable.
+                    if packet.timestamp < timestamp {
+                        bail!(
+                            "Pause: absolute time {} is before the accumulated time {} (desync before pc {:#x})",
+                            packet.timestamp, timestamp, pause_pc
+                        );
+                    }
+                    if packet.target_prv != prv || packet.target_ctx != ctx {
+                        warn!(
+                            "Pause: packet prv/ctx ({:?}, {}) differ from decoder ({:?}, {})",
+                            packet.target_prv, packet.target_ctx, prv, ctx
+                        );
+                    }
+                    if packet.from_address != 0 {
+                        warn!("Pause: reserved trap_addr field is {:#x}, ignoring", packet.from_address);
+                    }
+                    timestamp = packet.timestamp;
+                    bus.broadcast(Entry::event(EventKind::pause(pause_pc), timestamp));
+                    stream_state = StreamState::Gap { pause_ts: timestamp };
+                    stats.gaps += 1;
+                    continue;
+                }
+                SyncType::SyncResume => {
+                    let StreamState::Gap { pause_ts } = stream_state else {
+                        bail!("Resume at {} while {:?}", packet.timestamp, stream_state);
+                    };
+                    if packet.timestamp <= pause_ts {
+                        bail!("Resume time {} is not after Pause time {}", packet.timestamp, pause_ts);
+                    }
+                    let dropped = packet.from_address;
+                    pc = PC::new(packet.target_address);
+                    timestamp = packet.timestamp;
+                    prv = packet.target_prv;
+                    ctx = packet.target_ctx;
+                    // same policy as Start: with no ASID list every ctx is "known"
+                    u_unknown_ctx = prv == Prv::PrvUser
+                        && !valid_ctxs.is_empty()
+                        && !find_ctx(ctx, &valid_ctxs);
+                    decoder_cache.reset();
+                    // the hardware predictor is reset on Resume; mirror it
+                    bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
+                    bus.broadcast(Entry::event(
+                        EventKind::resume(pc.get_addr(), prv, ctx, dropped, pause_ts),
+                        timestamp,
+                    ));
+                    stats.gap_cycles += timestamp - pause_ts;
+                    stats.dropped_packets += dropped;
+                    stream_state = StreamState::Body;
+                    continue;
+                }
+                SyncType::SyncEnd => {
+                    let StreamState::Body = stream_state else {
+                        bail!("End at {} while {:?}", packet.timestamp, stream_state);
+                    };
+                    let end_pc = refund_addr(packet.target_address);
+                    if can_walk {
+                        let new_pc = step_bb_until(
+                            pc.get_addr(),
+                            curr_insn_map,
+                            end_pc,
+                            &mut bus,
+                            &mut insn_count,
+                            prv,
+                            ctx,
+                        );
+                        if new_pc != end_pc {
+                            warn!("End: walked to {:#x}, packet says {:#x}", new_pc, end_pc);
+                        }
+                    }
+                    pc.set_addr(end_pc);
+                    // End binds to the retire group after the last covered event, so its
+                    // time is at or after the accumulated time; only monotonicity is checkable.
+                    if packet.timestamp < timestamp {
+                        warn!("End: absolute time {} is before the accumulated time {}", packet.timestamp, timestamp);
+                    }
+                    timestamp = packet.timestamp;
+                    bus.broadcast(Entry::event(EventKind::sync_end(pc.get_addr()), timestamp));
+                    stats.session_cycles += timestamp.saturating_sub(session_start_ts);
+                    stream_state = StreamState::Ended;
+                    continue;
+                }
+                SyncType::SyncStart => {
+                    let StreamState::Ended = stream_state else {
+                        bail!("Start at {} while {:?} (only legal right after End)", packet.timestamp, stream_state);
+                    };
+                    let new_cfg = runtime_cfg_from_start(&packet)?;
+                    if new_cfg != runtime_cfg {
+                        // receivers were configured from the first session's cfg
+                        bail!(
+                            "session {} runtime_cfg {:?} differs from first session {:?}; not supported yet",
+                            stats.sessions + 1, new_cfg, runtime_cfg
+                        );
+                    }
+                    pc = PC::new(packet.target_address);
+                    timestamp = packet.timestamp;
+                    prv = packet.target_prv;
+                    ctx = packet.target_ctx;
+                    u_unknown_ctx = false;
+                    decoder_cache.reset();
+                    bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
+                    session_start_ts = timestamp;
+                    stats.sessions += 1;
+                    bus.broadcast(Entry::event(
+                        EventKind::sync_start(new_cfg, pc.get_addr(), prv, ctx),
+                        timestamp,
+                    ));
+                    stream_state = StreamState::Body;
+                    continue;
+                }
+                SyncType::SyncPeriodic | SyncType::SyncNone => {
+                    bail!("unsupported sync type {:?} at {}", sync_type, packet.timestamp);
+                }
+            }
+        }
+
+        // every non-sync packet needs an exact position to walk from
+        if stream_state != StreamState::Body {
+            bail!(
+                "{:?} packet at accumulated time {} while {:?}; expected a sync",
+                packet.f_header, timestamp, stream_state
             );
-            pc.set_addr(new_pc);
-            bus.broadcast(Entry::event(
-                EventKind::sync_end(pc.get_addr()),
-                packet.timestamp,
-            ));
-            break;
-        } else if packet.f_header == FHeader::FTrap {
+        }
+
+        if packet.f_header == FHeader::FTrap {
             // step until the trap's from_address (previous insn)
             // only step if we are in a known ctx
             let trapping_pc = refund_addr(packet.from_address);
@@ -576,6 +781,18 @@ pub fn decode_trace(
     drop(bus);
     // println!("[Success] Decoded {} packets", packet_count);
     progress_bar.finish_and_clear();
+    match stream_state {
+        StreamState::Ended => {}
+        StreamState::Body => {
+            warn!("trace ended without a Sync End; session accounting is partial");
+            stats.session_cycles += timestamp.saturating_sub(session_start_ts);
+        }
+        StreamState::Gap { pause_ts } => {
+            warn!("trace ended inside a gap (Pause at {} without Resume)", pause_ts);
+            stats.session_cycles += pause_ts.saturating_sub(session_start_ts);
+        }
+    }
+    stats.report();
     println!("insn_count: {}", insn_count);
     println!("file size: {} bytes", trace_file_size);
     println!("known ctx bytes read: {} bytes", known_ctx_bytes_read);

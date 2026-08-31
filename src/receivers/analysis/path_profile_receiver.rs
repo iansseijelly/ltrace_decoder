@@ -138,6 +138,11 @@ impl AbstractReceiver for PathProfileReceiver {
                     EventKind::NonTakenBranch { .. } => {
                         self.record_branch(false);
                     }
+                    EventKind::Pause { .. } => {
+                        // the path in flight is incomplete; don't dump it as a
+                        // finished path when the unwinder closes its frames
+                        self.current_path = None;
+                    }
                     _ => {}
                 }
                 if let Some(update) = self.unwinder.step(&Entry::Event {

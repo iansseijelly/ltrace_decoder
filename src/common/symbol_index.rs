@@ -80,6 +80,19 @@ impl SymbolIndex {
 
         Some((start, end))
     }
+
+    /// Return `[start, end)` of the symbol containing `addr` (the nearest
+    /// symbol start `<= addr`), or `None` if no symbol starts at or below it.
+    pub fn containing(&self, prv: Prv, ctx: u64, addr: u64) -> Option<(u64, u64)> {
+        let map = self.get(prv, ctx);
+        let (&start, _) = map.range(..=addr).next_back()?;
+        let end = map
+            .range((start + 1)..)
+            .next()
+            .map(|(&next_start, _)| next_start)
+            .unwrap_or(u64::MAX);
+        Some((start, end))
+    }
 }
 pub fn build_single_symbol_index(
     elf_path: String,

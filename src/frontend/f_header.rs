@@ -15,17 +15,25 @@ pub enum FHeader {
     FRes2 = 0b111, // reserved for now
 }
 
+impl FHeader {
+    /// Decode the 3-bit f_header field; `None` for the reserved codes 110/111.
+    pub fn try_from_u8(value: u8) -> Option<Self> {
+        match value {
+            0b000 => Some(FHeader::FTb),
+            0b001 => Some(FHeader::FNt),
+            0b010 => Some(FHeader::FUj),
+            0b011 => Some(FHeader::FIj),
+            0b100 => Some(FHeader::FTrap),
+            0b101 => Some(FHeader::FSync),
+            _ => None,
+        }
+    }
+}
+
 impl From<u8> for FHeader {
     fn from(value: u8) -> Self {
-        match value {
-            0b000 => FHeader::FTb,
-            0b001 => FHeader::FNt,
-            0b010 => FHeader::FUj,
-            0b011 => FHeader::FIj,
-            0b100 => FHeader::FTrap,
-            0b101 => FHeader::FSync,
-            _ => panic!("Invalid FHeader value"),
-        }
+        Self::try_from_u8(value)
+            .unwrap_or_else(|| panic!("Invalid FHeader value: {:#05b}", value))
     }
 }
 

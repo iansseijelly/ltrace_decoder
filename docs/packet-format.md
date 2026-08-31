@@ -1,8 +1,9 @@
 # TACIT Packet Encoding Specification
 
-**Status:** v1.0 documents the format as implemented today by
+**Status:** v1.1. Sections 1–8 document the format as implemented by
 `generators/tacit` (encoders) and `software/tacit_decoder` (decoder).
-Section 9 is a **proposed** extension (drop / resume) and is not implemented.
+Section 9 (lossy mode: Pause / Resume, multi-session files) is **normative**
+and implemented in the decoder; the encoder side is not implemented yet.
 
 Where the RTL and the decoder disagree, or where the format has known warts,
 this is called out explicitly in §8 (Errata) rather than papered over.
@@ -83,8 +84,8 @@ Trap type (`func3` when `f_header == Trap`): `001` exception, `010` interrupt,
 `100` trap return (`sret`/`mret`). `000` and other values are invalid.
 
 Sync type (`func3` when `f_header == Sync`): `001` Start, `010` Periodic
-(defined, never emitted), `011` End. `100` Pause and `101` Resume are proposed
-(§9).
+(defined, never emitted), `011` End, `100` Pause, `101` Resume (§9). `000`,
+`110`, `111` are invalid; the decoder rejects them.
 
 If `c_header != CNA`, the byte is a **compressed packet** and bits `[7:2]` are
 not a header at all but a 6-bit timestamp delta (§4.1).
@@ -94,7 +95,7 @@ not a header at all but a 6-bit timestamp delta (§4.1).
 Payload fields, when present, always appear in this order:
 
 ```
-header | prv | ctx | trap_addr-slot | target_addr | time
+header | prv | ctx | trap_addr | target_addr | time
 ```
 
 (`TracePacketizer` and `TraceMaskedPacketizer` both serialize in this order;
@@ -159,18 +160,19 @@ header(CNA, f=Trap, func3=type) | prv | [ctx: varint] | trap_addr: varint | targ
 ### 4.5 Sync
 
 ```
-header(CNA, f=Sync, func3=type) | prv | ctx: varint | cfg-slot | target_addr: varint | time: varint
+header(CNA, f=Sync, func3=type) | prv | ctx: varint | trap_addr: varint | target_addr: varint | time: varint
 ```
 
 * `prv`: `from_priv` is always `0`; `to_priv` is the current privilege.
 * `ctx`: current ASID, always present.
-* `cfg-slot`: occupies the `trap_addr` position. For **Start** it is the
-  7-bit `runtime_cfg`, emitted through the varint encoder so it is always
-  exactly one byte `0x80 | cfg`:
-  `cfg[1:0] = bp_mode`, `cfg[6:2] = log2(bp_entries / 64)`. For **End** the
-  encoder writes `0`, i.e. the byte `0x80`; the decoder reads and discards one
-  byte. (See §8 for a decoder bug in how Start's slot is parsed, and §9 for the
-  proposed reuse of this slot.)
+* `trap_addr`: the same field position Trap packets use for the trapping PC.
+  A sync has no trapping PC, so each sync type gives it its own meaning; there
+  is no tag, the header byte alone decides. For **Start** it is the 7-bit
+  `runtime_cfg`, emitted through the varint encoder so it is always exactly one
+  byte `0x80 | cfg`: `cfg[1:0] = bp_mode`, `cfg[6:2] = log2(bp_entries / 64)`
+  (so `bp_entries = 64 << cfg[6:2]`). For **End** and **Pause** it is `0`
+  (byte `0x80`). For **Resume** it is the dropped-packet count (§9.4). The
+  decoder reads it as a varint for every sync type.
 * `target_addr = sync_pc >> 1`, **absolute**, encoded at full `iaddrWidth`
   (a sign-extended kernel VA costs up to 10 varint bytes).
 * `time`: **absolute** cycle count.
@@ -185,13 +187,13 @@ older than the sync point).
 * **Start**: first packet of the stream, emitted on the first retire after
   enable. Sets PC, time, prv, ctx and the runtime configuration.
 * **End**: emitted on the first retire after disable. The decoder walks from
-  its current PC to `sync_pc` and stops. **Any Sync after Start terminates
-  decoding today**, regardless of type (`decoder.rs` breaks on `FSync`;
-  `packet.rs` only forbids a second Start).
+  its current PC to `sync_pc`, emits `SyncEnd`, and then continues reading:
+  EOF ends the trace, a Start opens a new session (§9.5).
+* **Pause** / **Resume**: see §9.
 
 ## 5. Timestamps
 
-* Start (and the proposed Resume) carry **absolute** time. All other packets
+* All Sync packets carry **absolute** time. All other packets
   carry a **delta** relative to the previous *enqueued* packet's retire cycle
   (`prev_time`, updated whenever a packet is enqueued; set to the sync cycle by
   a Sync).
@@ -206,11 +208,13 @@ older than the sync point).
 ## 6. Stream grammar and decoding rules
 
 ```
-stream  := SyncStart body SyncEnd
+trace   := session+
+session := Start body ( Pause Resume body )* End
 body    := ( compressed | TB | NT | IJ | UJ | Trap )*
 ```
 
-(§9.2 proposes the v1.1 grammar with multiple sessions and pause/resume.)
+(§9 defines sessions and gaps; a lossless single-session trace is
+`Start body End`.)
 
 The decoder (`decode_trace`) maintains `(pc, timestamp, prv, ctx)`:
 
@@ -231,6 +235,8 @@ The decoder (`decode_trace`) maintains `(pc, timestamp, prv, ctx)`:
 
 Because step (2) is a walk from the previous state, **losing or corrupting a
 single byte anywhere desynchronizes every later packet until the next Sync**.
+This is why lossy mode (§9) drops only whole packets, upstream of
+serialization, and brackets every gap with explicit syncs.
 
 ## 7. Branch-prediction mode (serial `TacitEncoder` only)
 
@@ -259,14 +265,16 @@ implements only `BrTarget`.
 
 ## 8. Errata / observations (current implementation)
 
-1. **`bp_entries` is parsed incorrectly.** `read_first_packet` reads the cfg
-   slot with `read_u8` and applies `BP_ENTRY_MASK = 0b1111_1100`, which
-   includes bit 7 — the varint terminator, always `1`. The decoded table size
-   is therefore `(32 + log2(n/64)) * 64`, e.g. `2304` for a 1024-entry
-   hardware predictor. Since the decoder's index is `(pc>>1) % num_entries`,
-   `BrPredict` decoding is mis-indexed relative to hardware. Harmless in
-   `BrTarget` mode (the parallel encoder). Fix: mask with `0b0111_1100`, or
-   decode the slot as a varint.
+1. **`bp_entries` was parsed incorrectly (fixed in v1.1).** The decoder read
+   Start's `trap_addr` byte with `read_u8` and a mask that included bit 7 (the
+   varint terminator), and then treated the field as a linear multiplier
+   (`field * 64`) although the RTL writes `log2(n_entries / 64)`. A 1024-entry
+   hardware predictor decoded as `2304`; the parallel encoder's `cfg = 0`
+   decoded as `2048`. Since the decoder's index is `(pc>>1) % num_entries`,
+   `BrPredict` decoding was mis-indexed relative to hardware (harmless in
+   `BrTarget`). The decoder now reads the field as a varint and computes
+   `64 << field`. Traces are unaffected; only the printed/used table size
+   changes.
 2. `bp_mode = 1` produces an unusable stream from the serial encoder (§7).
 3. Compressed-packet threshold differs by one between encoders (§4.1).
 4. The decoder assumes 40-bit virtual addresses (`ADDR_BITS = 40`) when
@@ -278,57 +286,66 @@ implements only `BrTarget`.
    XOR-against-previous-PC encoding would save most of that.
 6. There is no stream magic/version byte. Start's `cfg` is the only
    configuration carried in-band.
-7. `SyncPeriodic` is defined on both sides but never emitted, and the decoder
-   would treat it as End.
-8. `f_header = 110` ("value") is reserved on the RTL side and panics in the
-   decoder.
+7. `SyncPeriodic` is defined on both sides but never emitted; the decoder
+   rejects it as an error (v1.1; it used to be treated as End).
+8. `f_header = 110` ("value") and `111` are reserved on the RTL side; the
+   decoder returns a decode error for them (v1.1; it used to panic).
 
-## 9. PROPOSED: pause / resume and multi-session traces (v1.1, not implemented)
+## 9. Lossy mode: Pause / Resume and multi-session traces (v1.1)
 
-Motivation: today, when the packet queues fill, the encoder asserts `stall`
-and the core stops committing. The alternative is to stop *tracing* instead
-of stopping the *core*. Because of §6, that is only decodable if the loss is
+Motivation: in lossless mode, when the packet queues fill the encoder asserts
+`stall` and the core stops committing. Lossy mode stops *tracing* instead of
+stopping the *core*. Because of §6, that is only decodable if the loss is
 (a) at whole-packet granularity, before serialization, and (b) bracketed by
-explicit synchronization packets. This section defines (b). It also defines
-how several independently collected traces concatenate into one file.
+explicit synchronization packets. This section defines (b); §9.7 lists what
+(a) requires of the encoder. It also defines how several independently
+collected traces concatenate into one file.
 
 Design rule: **every distinct semantic gets its own sync type.** Sync type
-codes are plentiful (8) and cost nothing; what is scarce is payload slots
+codes are plentiful (8) and cost nothing; what is scarce is payload fields
 (each sync has exactly one spare, the `trap_addr` position). No packet's
 meaning depends on a payload value or on what follows it.
 
+Status: decoder implemented (`packet.rs`, `decoder.rs`, all receivers);
+encoder not yet implemented.
+
 ### 9.1 Sync types
 
-| `func3` | Name | Binds to | Spare slot | Decoder action on `target_addr` |
-|---|---|---|---|---|
-| `001` | Start | next retire group | `runtime_cfg` (1 byte) | set PC |
-| `010` | Periodic (reserved) | next retire group | `0` (`0x80`) | walk to PC and verify |
-| `011` | End | next retire group | `0` (`0x80`) | walk to PC and verify; **session terminal** |
-| `100` | **Pause** (new) | the first *uncovered* instruction | `0` (`0x80`) | walk to PC and verify; enter gap |
-| `101` | **Resume** (new) | next retire group | `dropped` (varint) | set PC; leave gap |
+| `func3` | Name | Header byte | Binds to | `trap_addr` | Decoder action on `target_addr` |
+|---|---|---|---|---|---|
+| `001` | Start | `0x36` | next retire group | `runtime_cfg` (1 byte) | set PC |
+| `010` | Periodic (reserved) | `0x56` | — | — | error |
+| `011` | End | `0x76` | next retire group | `0` (`0x80`) | walk to PC and verify; session terminal |
+| `100` | **Pause** | `0x96` | the first *lost* message | `0` (`0x80`) | walk to PC, verify exact landing; enter gap |
+| `101` | **Resume** | `0xB6` | next retire group | `dropped` (varint) | set PC; leave gap |
 
-All five share the §4.5 layout: `header | prv | ctx | slot | target_addr | time`,
-with `prv.from = 0`, `ctx` always present, `time` absolute.
+All share the §4.5 layout `header | prv | ctx | trap_addr | target_addr | time`,
+with `prv.from = 0`, `ctx` always present, `target_addr` absolute (`>> 1`),
+and `time` absolute.
 
 ### 9.2 Stream grammar
 
 ```
 trace   := session+
 session := Start body ( Pause Resume body )* End
-body    := ( compressed | TB | NT | IJ | UJ | Trap | Periodic )*
+body    := ( compressed | TB | NT | IJ | UJ | Trap )*
 ```
 
-Invariants the decoder enforces:
+Invariants the decoder enforces (violations are decode errors, not panics):
 
 * Start appears only as the first packet of the file or immediately after End.
-* Pause appears only inside a body. Resume appears only immediately after Pause.
+* Pause appears only inside a body. Resume appears only immediately after
+  Pause. Any non-sync packet inside a gap is an error.
 * End appears only inside a body (never directly after Pause — see §9.5).
 * After End, the next byte is either EOF or a Start.
+* A `body` may be empty: `Pause Resume Pause Resume` is legal (two gaps with no
+  covered event between them).
 
 A **session** is one enable→disable window. Timestamps are monotonic within a
 session and **unrelated across sessions** (sessions may come from different
-runs or different times; the time base may go backwards). Each Start re-reads
-`runtime_cfg`, which may differ per session.
+runs; the time base may go backwards). Each Start carries `runtime_cfg`; the
+decoder currently requires it to be identical across sessions (receivers are
+configured once).
 
 A **gap** is `[pause.time, resume.time)` inside one session: control flow is
 unknown in the gap and exact outside it; the time base is continuous across
@@ -342,22 +359,37 @@ header(CNA, f=Sync, func3=100) | prv | ctx: varint | 0x80 | target_addr: varint 
 
 Header byte `0x96`.
 
-* `target_addr = pause_pc >> 1` where `pause_pc` is the address of the first
-  instruction whose packet was **not** encoded. Every instruction before it is
-  covered exactly; it and everything after it until Resume are not.
-* `time`: retire cycle of that instruction.
-* `prv`, `ctx`: current at that instruction (redundant, kept for layout
-  uniformity).
-* Decoder: walk from the current PC to `pause_pc` with `step_bb_until` — it
-  must land exactly (advisory in `BrPredict` mode, where the walk passes
-  through predicted branches); `timestamp := time`; emit
-  `Pause { pc, ts }`; enter gap state.
-
-Because enqueue is atomic per retire group (§5), a lost group is lost whole;
-`pause_pc` is therefore always the first packet-bearing slot of that group,
-and always a control-flow instruction (or a trap point) reachable by a
-straight-line walk from the previous event — which is what makes it
-verifiable.
+* **Binding.** The retire group the encoder decides to drop (the encoder's
+  `ingress_1` stage). Let `j` be the lowest slot in that group whose `itype`
+  is not `ITNothing`. Then `target_addr = group(j).iaddr >> 1`,
+  `time = group.time`, `prv`/`ctx` = the group's. `pause_pc` is therefore
+  the address of the **first instruction whose packet was not encoded**, and
+  is always a control-flow instruction (or a trap point). Slots `0..j-1` are
+  plain instructions covered by the decoder's straight-line walk.
+* **Coverage contract.** Every control-flow event of instructions before
+  `pause_pc` is in the stream; `pause_pc` and everything after it until Resume
+  are not. A lost trap-type message makes `pause_pc` the trapping (or
+  interrupted-before) instruction, exactly what the Trap's `trap_addr` would
+  have carried; the trap's target, privilege and context change are lost and
+  re-established by Resume.
+* **Time.** `time` is the retire cycle of the lost group, i.e. of `pause_pc`
+  itself, so it is **at or after** the accumulated time of the last covered
+  event (equal only when both retired in the same cycle). It is therefore the
+  exact end time of the last covered basic block, which receivers may record;
+  the decoder can only check monotonicity (`time >= accumulated`). The exact
+  check at a Pause is the walk landing on `target_addr`. All syncs carry
+  absolute time for uniformity; byte count does not affect queue pressure
+  (queue entries are fixed-width bundles).
+* **Emission.** Pause is enqueued in the very cycle the drop is decided, from
+  the reserve the high watermark guarantees; it is never itself dropped. It is
+  only emitted from the data state (never before Start has enqueued). A group
+  carrying no message never triggers a Pause: nothing was lost.
+* **Decoder.** If in a known context, `step_bb_until(pause_pc)` must land
+  exactly (error in `BrTarget`; warning in `BrPredict`, where the walk passes
+  through predicted branches). `time` must not be before the accumulated
+  timestamp (error). `prv`/`ctx` must equal the decoder's (warning).
+  `trap_addr` must be `0` (warning, then ignored — reserved). Then
+  `timestamp := time`, emit `Pause { pause_pc }`, enter the gap.
 
 ### 9.4 Resume
 
@@ -367,67 +399,101 @@ header(CNA, f=Sync, func3=101) | prv | ctx: varint | dropped: varint | target_ad
 
 Header byte `0xB6`.
 
-* Bound exactly like Start: the oldest instruction of the next retire group
-  after the encoder decides to resume; `target_addr`, `time`, `prv`, `ctx` are
-  absolute state at that point.
-* `dropped`: number of packets discarded from the Pause (inclusive of the
-  group that triggered it) to this Resume. Varint, may exceed one byte.
-* Decoder: no walk; set `pc`, `prv`, `ctx`, `timestamp` from the packet;
-  re-evaluate known/unknown context against the ASID list; reset the
-  predictor model in `BrPredict`; emit
-  `Resume { pc, prv, ctx, ts, dropped, pause_ts }`; leave gap state.
+* **Binding.** Exactly like Start: the oldest slot of the next retire group
+  after the encoder decides to resume (`ingress_0.group(0)`); `target_addr`,
+  `time`, `prv`, `ctx` are absolute state there. The oldest slot (not the
+  first message slot) is used because the decoder needs a PC to walk *from*.
+  The message sitting in `ingress_1` in that cycle is older than the bind
+  point and is dropped and counted, as `sSync` already does for Start.
+* **`dropped`**: number of **packets** (messages with `itype != ITNothing`),
+  not groups or bytes, discarded from the Pause group inclusive to the Resume
+  group exclusive. In `BrPredict` mode it counts branch events the encoder
+  saw, not coalesced packets. 32-bit saturating in hardware;
+  `0xFFFF_FFFF` means "at least this many".
+* **Invariants.** `resume.time > pause.time`, strictly (the resume group is at
+  least one pipeline advance later). `prev_time := resume.time` in the encoder;
+  the next packet's delta is relative to Resume. The session's time base is
+  continuous across the gap (unlike Start).
+* **Decoder.** Error unless the previous packet was Pause or
+  `time <= pause.time`. No walk; set `pc`, `prv`, `ctx`, `timestamp` from the
+  packet; drop the decode cache; re-evaluate the known/unknown-context flag
+  against the ASID list (with no ASID list configured every context is
+  known, as for Start); in `BrPredict` reset the predictor table and pending
+  hit count (hardware does the same); emit
+  `Resume { pc, prv, ctx, dropped, pause_ts }`; leave the gap.
 
 ### 9.5 End and multi-session files
 
-End is unchanged from v1.0: slot `0x80`, PC verified by walk, terminal for the
-session. After End the decoder emits `SyncEnd` and then **continues reading**:
-EOF ends the trace; a Start begins a new session; anything else is an error.
+End is unchanged from v1.0: `trap_addr` `0x80`, PC verified by walk, terminal
+for the session. After End the decoder emits `SyncEnd` and then **continues
+reading**: EOF ends the trace; a Start begins a new session (state
+re-initialized from it, `SyncStart` emitted again); anything else is an error.
+A trace that ends without End (truncated file) decodes with a warning.
 
 If tracing is disabled while the encoder is paused, the encoder emits
 **Resume then End** on consecutive retire groups (a zero-length covered
 segment) rather than End directly. This keeps End's walk-verification and zero
-slot unconditional and keeps the grammar free of a `Pause End` production.
+field unconditional and keeps the grammar free of a `Pause End` production.
 
-### 9.6 Decoder / receiver rules
+### 9.6 Decoder / receiver behavior (implemented)
 
-* `packet.rs`: read the slot as a varint for every sync type (Start's byte is
-  then masked with `0x7C`, fixing erratum 8.1); accept Pause/Resume/End
-  mid-stream; a Start mid-stream is legal only right after End.
-* `decoder.rs`: replace the `FSync → break` with the per-type actions above
-  and a `gap`/`session` state machine enforcing §9.2.
-* Events: existing `SyncStart`/`SyncEnd` now mean *session* boundaries (new
-  time base); new `Pause`/`Resume` mean *gap* boundaries (same time base).
-  Receivers close open basic blocks / frames at `Pause.ts` (as they already
-  do at a Trap boundary) and re-seed at `Resume` without resetting session
-  state (e.g. speedscope keeps one profile and draws the gap as a hole).
-* End-of-run statistics: sessions, gaps, gap cycles, dropped packets, fraction
-  of session time covered.
+* `packet.rs`: one shared sync-body parser for all sync types; `trap_addr`
+  read as a varint (this also fixed erratum 8.1). Reserved codes are errors.
+* `decoder.rs`: a `Body / Gap / Ended` stream-state machine enforcing §9.2,
+  plus end-of-run statistics: sessions, gaps, gap cycles, dropped packets,
+  fraction of session time covered.
+* Events: `SyncStart`/`SyncEnd` mean *session* boundaries (new time base);
+  `Pause { pause_pc }` / `Resume { pc, prv, ctx, dropped, pause_ts }` mean
+  *gap* boundaries (same time base).
+* Stack unwinder: Pause closes every frame (return paths across a gap are
+  unknowable); Resume adopts prv/ctx and reopens only the function containing
+  the resume PC — callers cannot be recovered.
+* Receivers: the block ending at `pause_pc` is exact and is recorded
+  (`bb_stats`, `bb_pair_stats`); gap cycles are attributed to nothing
+  (`prv_breakdown` reports them separately; `perfect_sampler` skips ticks in
+  the gap; `iteration_breakdown` does not count frames closed by Pause as
+  exits). `func_path` drops an invocation cut by a gap; `path_profile` drops
+  the in-flight path. `speedscope` draws a synthetic `[trace gap]` frame
+  across the gap in one profile. `sqlite` records `PAUSE`/`RESUME` rows.
+  Emulators flush staged events at Pause (exact cycle, like a trap) and
+  re-establish their time base at Resume (like a sync); error analyzers do
+  not count the gap.
+* `scripts/splice_gap.py` cuts a packet range out of a lossless trace and
+  splices in a correctly bound Pause/Resume, for testing.
 
-### 9.7 Encoder requirements (summary; RTL design is out of scope here)
+### 9.7 Encoder requirements (not yet implemented)
 
 * Drop only whole messages, upstream of the packet queues; never drop bytes.
-* Reserve one queue entry in drop mode so that Pause can be enqueued in the
-  very cycle the loss is detected. Pause binds to the *lost* group (the
-  encoder's `ingress_1` stage) — unlike Start/Resume/End, which bind to the
-  next group (`ingress_0`). This is a second sync binding point in the RTL.
-* Count discarded packets from Pause to Resume; report in Resume's slot.
-* Leave the drop state only when queue occupancy is below a low watermark
+* Lossy mode is a control-register bit. In lossy mode the `stall` output to
+  the core is constantly deasserted; the existing stall condition becomes the
+  **high watermark** that triggers a Pause. Both existing stall rules
+  (`bufferDepth - coreStages` and the SRAM reserve) leave more than the one
+  free entry Pause needs.
+* Pause binds to the *lost* group (`ingress_1`) — unlike Start/Resume/End,
+  which bind to the next group (`ingress_0`). This is a second sync binding
+  point in the RTL; its PC is the first message slot, not slot 0.
+* Count discarded packets from Pause to Resume; report in Resume's
+  `trap_addr`.
+* Leave the drop state only when queue occupancy is below a **low watermark**
   (hysteresis), so Resume is guaranteed to enqueue.
-* On Resume, `prev_time` is the sync cycle (as for any sync); the serial
-  encoder additionally resets predictor state and the pending hit count.
+* On Resume, `prev_time` is the sync cycle (as for any sync); in `BrPredict`
+  mode the serial encoder additionally resets the predictor table and the
+  pending hit count (or lossy mode is restricted to `bp_mode = 0`).
 * Disable while paused → Resume then End (§9.5).
-* In drop mode the `stall` output to the core is constantly deasserted.
+* Expose dropped-packet and pause counters to software.
 
 ### 9.8 Open decisions
 
 * **Software pause.** Should a driver-level "pause" ioctl exist that emits
   Pause/Resume (one session, gap semantics, `dropped = 0`) as opposed to
-  disable/enable (End/Start, new session)? The encoder already knows the
-  difference; it is a question of what the driver exposes.
+  disable/enable (End/Start, new session)?
 * **Per-session decoder configuration.** Concatenated sessions may need
-  different binaries / ASID lists. Out of scope for the packet format.
-* **Retired-instruction count in the gap.** No spare slot; would widen the
-  encoder's queue entries. Not in v1.1.
+  different binaries / ASID lists / `runtime_cfg`. Out of scope for the
+  packet format; the decoder currently rejects a `runtime_cfg` change.
+* **Retired-instruction count in the gap.** Every Resume payload field is
+  used; would need a new field or a widened Resume. Not in v1.1.
+* **Pause `trap_addr`.** Reserved (`0`). A pause-reason code is the obvious
+  future use.
 * **Periodic.** The Pause/Resume machinery makes lossless periodic resync
   (seekable traces) cheap to add; not in v1.1.
 
@@ -446,6 +512,7 @@ All values hex. `varint(n)` shown expanded.
 | Exception in U at pc `P`, handler `H`, Δt | `32 88 varint(P>>1) varint((P^H)>>1) varint(Δt)` | `func3=001`; prv `10 001 000` = `88` (to S, from U) |
 | `sret` S→U, ASID 117, from `R`, to `T`, Δt | `92 81 F5 varint(R>>1) varint((R^T)>>1) varint(Δt)` | prv `10 000 001` = `81`; ctx `varint(117) = F5` |
 | Sync Start in S, ASID 0, parallel encoder, pc `P`, time `T` | `36 88 80 80 varint(P>>1) varint(T)` | ctx `80`; cfg `80` (`bp_mode 0`) |
-| Sync End | `76 ...` | same layout as Start; cfg slot `80` |
-| *Proposed* Sync Pause | `96 prv ctx 80 varint(pause_pc>>1) varint(T)` | slot `80`; PC = first uncovered instruction |
-| *Proposed* Sync Resume, 1234 packets dropped | `B6 prv ctx D2 89 addr time` | `varint(1234)`: `1234 & 7F = 52 → 52`, `1234 >> 7 = 9 → 89` |
+| Sync End | `76 ...` | same layout as Start; `trap_addr` `80` |
+| Sync Pause, M-mode, ASID 0, `pause_pc = 0x10AB4`, `T = 1 000 000` | `96 98 80 80 5A 0A 82 40 04 BD` | prv `10 011 000` = `98`; `trap_addr` `80`; `0x855A → 5A 0A 82`; `0xF4240 → 40 04 BD` |
+| Sync Resume, U-mode, ASID 117, 1234 dropped, `pc = 0x10C00`, `T = 1 004 096` | `B6 80 F5 52 89 00 0C 82 40 24 BD` | `varint(1234)`: `1234 & 7F = 52`, `1234 >> 7 = 9 → 89`; `0x8600 → 00 0C 82` |
+| Disable while paused | `B6 … 76 …` | Resume bound to group *n*, End to group *n+1* |

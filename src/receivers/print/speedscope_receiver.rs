@@ -55,6 +55,8 @@ pub struct SpeedscopeReceiver {
     events: Vec<ProfileEvent>,
     unwinder: StackUnwinder,
     curr_ctx: u64,
+    /// synthetic frame drawn across every Pause..Resume gap
+    gap_frame: u32,
 }
 
 impl SpeedscopeReceiver {
@@ -63,7 +65,9 @@ impl SpeedscopeReceiver {
 
         let unwinder = StackUnwinder::new(Arc::clone(&symbols)).expect("stack unwinder");
 
-        let (frames, frame_lookup) = build_frames(&symbols);
+        let (mut frames, frame_lookup) = build_frames(&symbols);
+        let gap_frame = frames.len() as u32;
+        frames.push(json!({ "name": "[trace gap]" }));
 
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
@@ -79,6 +83,7 @@ impl SpeedscopeReceiver {
             events: Vec::new(),
             unwinder,
             curr_ctx: 0,
+            gap_frame,
         }
     }
 }
@@ -171,6 +176,17 @@ impl AbstractReceiver for SpeedscopeReceiver {
         match entry {
             Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
+                // the gap frame must close before the unwinder reopens a function
+                // frame at Resume, so speedscope's open/close nesting stays valid
+                if let EventKind::Resume { ctx, .. } = &kind {
+                    self.events.push(ProfileEvent {
+                        kind: "C".into(),
+                        frame: self.gap_frame,
+                        at: timestamp,
+                    });
+                    self.update_asid_frame(timestamp, *ctx);
+                }
+
                 if let Some(update) = self.unwinder.step(&Entry::Event {
                     timestamp,
                     kind: kind.clone(),
@@ -179,6 +195,14 @@ impl AbstractReceiver for SpeedscopeReceiver {
                 }
 
                 match &kind {
+                    EventKind::Pause { .. } => {
+                        // unwinder has closed every function frame; mark the hole
+                        self.events.push(ProfileEvent {
+                            kind: "O".into(),
+                            frame: self.gap_frame,
+                            at: timestamp,
+                        });
+                    }
                     EventKind::SyncStart {
                         start_prv: _,
                         start_pc: _,

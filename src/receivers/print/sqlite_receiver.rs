@@ -174,6 +174,14 @@ impl AbstractReceiver for SqliteReceiver {
                 EventKind::SyncEnd { end_pc } => {
                     self.push_event(timestamp, "SYNC_END", 0, end_pc);
                 }
+                EventKind::Pause { pause_pc } => {
+                    self.push_event(timestamp, "PAUSE", pause_pc, 0);
+                }
+                EventKind::Resume { pc, prv, ctx, .. } => {
+                    self.curr_prv = prv;
+                    self.curr_ctx = ctx;
+                    self.push_event(timestamp, "RESUME", 0, pc);
+                }
                 _ => {}
             },
         }

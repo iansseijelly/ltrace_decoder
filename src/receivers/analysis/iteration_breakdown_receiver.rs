@@ -148,8 +148,17 @@ impl AbstractReceiver for IterationBreakdownReceiver {
                 // 1. Feed to stack unwinder
                 let update = self.unwinder.step(&entry);
 
+                // Frames closed by a Pause are not real exits and the frame
+                // opened by a Resume is not a real entry: skip marker/tracked
+                // logic for gap events. A tracked-function invocation cut by a
+                // gap is dropped rather than counted with a bogus duration.
+                let is_gap_event = matches!(kind, EventKind::Pause { .. } | EventKind::Resume { .. });
+                if is_gap_event {
+                    self.in_tracked_func = false;
+                }
+
                 // 2. Check for marker function exit
-                if let Some(ref upd) = update {
+                if let (Some(ref upd), false) = (&update, is_gap_event) {
                     for frame in &upd.frames_closed {
                         if frame.symbol.name == self.marker_func {
                             // Account cycles up to this point before changing iteration state
@@ -171,7 +180,7 @@ impl AbstractReceiver for IterationBreakdownReceiver {
                 }
 
                 // 3. Track target function entry/exit
-                if self.in_iteration {
+                if self.in_iteration && !is_gap_event {
                     if let Some(ref upd) = update {
                         if let Some(ref frame) = upd.frames_opened {
                             if frame.symbol.name == self.tracked_func {
@@ -205,6 +214,11 @@ impl AbstractReceiver for IterationBreakdownReceiver {
                     EventKind::Trap { prv_arc, .. } => {
                         self.update_prv_cycles(timestamp);
                         self.curr_prv = prv_arc.1;
+                        self.prev_timestamp = timestamp;
+                    }
+                    EventKind::Resume { prv, .. } => {
+                        // gap cycles are attributed to nothing
+                        self.curr_prv = prv.clone();
                         self.prev_timestamp = timestamp;
                     }
                     _ => {

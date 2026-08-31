@@ -58,6 +58,7 @@ pub struct FuncPathReceiver {
     phase: Phase,
     entry_ts: u64,
     seen_filter: bool,
+    gap_aborted: u64,
     current_branches: Vec<bool>,
     path_records: HashMap<Vec<bool>, PathStats>,
     // per-invocation BB tracking
@@ -99,6 +100,7 @@ impl FuncPathReceiver {
             phase: Phase::Idle,
             entry_ts: 0,
             seen_filter: false,
+            gap_aborted: 0,
             current_branches: Vec::new(),
             path_records: HashMap::new(),
             prev_addr: 0,
@@ -234,6 +236,23 @@ impl AbstractReceiver for FuncPathReceiver {
         match entry {
             Entry::Instruction { .. } => {}
             Entry::Event { timestamp, kind } => {
+                // A gap makes the current invocation / post-exit window
+                // unobservable: drop the invocation (it would get a bogus
+                // duration and path), keep whatever post-exit blocks were seen.
+                if let EventKind::Pause { .. } = kind {
+                    match self.phase {
+                        Phase::Active => {
+                            self.current_branches.clear();
+                            self.current_bbs.clear();
+                            self.seen_filter = false;
+                            self.phase = Phase::Idle;
+                            self.gap_aborted += 1;
+                        }
+                        Phase::PostExit { .. } => self.commit_post_exit(),
+                        Phase::Idle => {}
+                    }
+                }
+
                 // Close BBs based on current phase
                 match self.phase {
                     Phase::Active => {
@@ -337,6 +356,12 @@ impl AbstractReceiver for FuncPathReceiver {
     }
 
     fn _flush(&mut self) {
+        if self.gap_aborted > 0 {
+            println!(
+                "func_path: {} invocation(s) of {} cut by trace gaps and dropped",
+                self.gap_aborted, self.func_name
+            );
+        }
         // Write path summary
         writeln!(self.path_writer, "count,mean,netvar,path").unwrap();
         for (branches, stats) in self.path_records.iter() {

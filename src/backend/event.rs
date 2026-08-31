@@ -40,6 +40,22 @@ pub enum EventKind {
         end_pc: u64,
     },
     SyncPeriodic,
+    /// Lossy mode: control flow is unknown from here until the next `Resume`.
+    /// `pause_pc` is the first instruction whose event was not encoded; the
+    /// entry's timestamp is its retire cycle. Same session / time base continues.
+    Pause {
+        pause_pc: u64,
+    },
+    /// Lossy mode: exact decoding restarts at `pc` with the given prv/ctx; the
+    /// entry's timestamp is absolute. `dropped` packets were lost since the
+    /// matching `Pause` at `pause_ts`.
+    Resume {
+        pc: u64,
+        prv: Prv,
+        ctx: u64,
+        dropped: u64,
+        pause_ts: u64,
+    },
     BPHit {
         hit_count: u64,
     },
@@ -132,6 +148,20 @@ impl EventKind {
     // pub fn sync_periodic() -> Self {
     //     EventKind::SyncPeriodic
     // }
+
+    pub fn pause(pause_pc: u64) -> Self {
+        EventKind::Pause { pause_pc }
+    }
+
+    pub fn resume(pc: u64, prv: Prv, ctx: u64, dropped: u64, pause_ts: u64) -> Self {
+        EventKind::Resume {
+            pc,
+            prv,
+            ctx,
+            dropped,
+            pause_ts,
+        }
+    }
 
     pub fn bphit(hit_count: u64) -> Self {
         EventKind::BPHit { hit_count }
@@ -238,6 +268,18 @@ impl std::fmt::Display for EventKind {
             ),
             EventKind::SyncEnd { end_pc } => write!(f, "SyncEnd: {:#x}", end_pc),
             EventKind::SyncPeriodic => write!(f, "SyncPeriodic"),
+            EventKind::Pause { pause_pc } => write!(f, "Pause: {:#x}", pause_pc),
+            EventKind::Resume {
+                pc,
+                prv,
+                ctx,
+                dropped,
+                pause_ts,
+            } => write!(
+                f,
+                "Resume: {:#x} ({:?} {:?}) dropped {} since {}",
+                pc, prv, ctx, dropped, pause_ts
+            ),
             EventKind::BPHit { hit_count } => write!(f, "BPHit: {}", hit_count),
             EventKind::BPMiss => write!(f, "BPMiss"),
             EventKind::Panic => write!(f, "Panic"),
@@ -281,6 +323,12 @@ impl EventKind {
             }
             EventKind::SyncPeriodic => {
                 format!("SYNC_PERIODIC,0x0,0x0")
+            }
+            EventKind::Pause { pause_pc } => {
+                format!("PAUSE,{:#x},0x0", pause_pc)
+            }
+            EventKind::Resume { pc, dropped, .. } => {
+                format!("RESUME,0x0,{:#x},{}", pc, dropped)
             }
             // EventKind::BPHit { hit_count } => {
             //     format!("BPHIT,{}", hit_count)

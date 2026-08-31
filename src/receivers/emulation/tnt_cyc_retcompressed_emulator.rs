@@ -97,6 +97,29 @@ impl AbstractEmulator for TNTCycRETCompressedEmulator {
                         self.event_staging.push((timestamp, kind.clone()));
                         self.needs_flush = true; // unconditionally flush on trap
                     }
+                    EventKind::Pause { .. } => {
+                        // exact cycle, end of observable stream: flush like a trap
+                        self.event_staging.push((timestamp, kind.clone()));
+                        self.needs_flush = true;
+                    }
+                    EventKind::Resume { prv, ctx, .. } => {
+                        // a gap re-establishes the time base, like a sync; the
+                        // return-address stack is unknowable across it
+                        self.event_staging.clear();
+                        self.stack.clear();
+                        self.n_tnt = 0;
+                        self.needs_flush = false;
+                        self.curr_cyc = timestamp;
+                        self.emu_clock = timestamp;
+                        self.curr_prv = prv;
+                        self.curr_ctx = ctx;
+                        self.analyzer.push_emulated_event(EmulationResult {
+                            ref_ts: timestamp,
+                            emu_ts: timestamp,
+                            event: kind,
+                        });
+                        return;
+                    }
                     _ => {
                         self.event_staging.push((timestamp, kind));
                     }

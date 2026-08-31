@@ -40,7 +40,7 @@ impl AbstractEmulatedAnalyzer for BBAnalyzer {
     fn push_emulated_event(&mut self, event: EmulationResult) {
         // a sync (re)establishes the time base without accounting the gap
         let (ref_d, emu_d) = match event.event {
-            EventKind::SyncStart { .. } => (0, 0),
+            EventKind::SyncStart { .. } | EventKind::Resume { .. } => (0, 0),
             _ => (
                 event.ref_ts.saturating_sub(self.prev_ref_ts),
                 event.emu_ts.saturating_sub(self.prev_emu_ts),

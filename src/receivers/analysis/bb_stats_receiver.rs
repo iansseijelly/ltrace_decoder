@@ -189,6 +189,22 @@ impl AbstractReceiver for BBStatsReceiver {
                 self.prev_addr = arc.1;
                 self.prev_timestamp = timestamp;
             }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Pause { pause_pc },
+            } => {
+                // the block ending at the paused control-flow instruction is
+                // exact (straight-line walk, exact cycle); only its successor is lost
+                self.update_bb_records(pause_pc, pause_pc, timestamp);
+            }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Resume { pc, .. },
+            } => {
+                // gap cycles belong to no block
+                self.prev_addr = pc;
+                self.prev_timestamp = timestamp;
+            }
             _ => {}
         }
     }

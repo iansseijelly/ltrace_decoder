@@ -10,6 +10,7 @@ pub struct PrvBreakdownReceiver {
     u_prv_cycles: u64,
     k_prv_cycles: u64,
     m_prv_cycles: u64,
+    gap_cycles: u64,
     prev_timestamp: u64,
 }
 
@@ -25,6 +26,7 @@ impl PrvBreakdownReceiver {
             u_prv_cycles: 0,
             k_prv_cycles: 0,
             m_prv_cycles: 0,
+            gap_cycles: 0,
             prev_timestamp: 0,
         }
     }
@@ -65,6 +67,15 @@ impl AbstractReceiver for PrvBreakdownReceiver {
                 self.update_prv_cycles(timestamp);
                 self.curr_prv = prv_arc.1;
             }
+            Entry::Event {
+                timestamp,
+                kind: EventKind::Resume { prv, pause_ts, .. },
+            } => {
+                // cycles inside the gap belong to no privilege level
+                self.gap_cycles += timestamp.saturating_sub(pause_ts);
+                self.curr_prv = prv;
+                self.prev_timestamp = timestamp;
+            }
             Entry::Event { timestamp, .. } => {
                 self.update_prv_cycles(timestamp);
             }
@@ -93,6 +104,13 @@ impl AbstractReceiver for PrvBreakdownReceiver {
             self.m_prv_cycles,
             self.m_prv_cycles as f64 / total_cycles as f64 * 100.0
         );
+        if self.gap_cycles > 0 {
+            println!(
+                "Unattributed cycles in trace gaps: {} ({:.2}% of attributed)",
+                self.gap_cycles,
+                self.gap_cycles as f64 / total_cycles as f64 * 100.0
+            );
+        }
         println!("--------------------------------");
     }
 }

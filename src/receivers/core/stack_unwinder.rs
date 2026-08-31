@@ -79,6 +79,10 @@ impl StackUnwinder {
                 arc,
                 ctx,
             } => self.step_trap(reason, prv_arc, arc.1, *ctx),
+            // control flow is unknown inside a gap: the return path of every
+            // open frame is unknowable, so the stack restarts at Resume
+            EventKind::Pause { .. } => self.flush(),
+            EventKind::Resume { pc, prv, ctx, .. } => self.step_resume(*pc, *prv, *ctx),
             _ => return None,
         }
     }
@@ -90,6 +94,22 @@ impl StackUnwinder {
     ) -> Option<StackUpdateResult> {
         self.curr_prv = start_prv.clone();
         self.curr_ctx = start_ctx.clone();
+        None
+    }
+
+    /// Re-seed after a gap: adopt prv/ctx and open the frame of the function
+    /// containing `pc` (its caller chain is unknown).
+    pub fn step_resume(&mut self, pc: u64, prv: Prv, ctx: u64) -> Option<StackUpdateResult> {
+        self.curr_prv = prv;
+        self.curr_ctx = ctx;
+        if let Some((start, _)) = self.func_symbol_map.containing(prv, ctx, pc) {
+            if let Some(frame) = self.push_frame(prv, ctx, start) {
+                return Some(StackUpdateResult {
+                    frames_opened: Some(frame),
+                    frames_closed: Vec::new(),
+                });
+            }
+        }
         None
     }
 

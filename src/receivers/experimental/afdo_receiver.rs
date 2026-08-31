@@ -80,6 +80,13 @@ impl AbstractReceiver for AfdoReceiver {
                 self.last_record = (0, start_pc);
             }
             Entry::Event {
+                timestamp: _,
+                kind: EventKind::Resume { pc, .. },
+            } => {
+                // no range spans a gap
+                self.last_record = (0, pc);
+            }
+            Entry::Event {
                 timestamp,
                 kind: EventKind::TakenBranch { arc },
             } => {

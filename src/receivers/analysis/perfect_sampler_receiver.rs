@@ -29,6 +29,7 @@ pub struct PerfectSamplerReceiver {
     path: String,
     next_ts: u64,
     synced: bool,
+    gap_ticks: u64,
     samples: Vec<(u64, u32)>,
     stack_ids: HashMap<Vec<u64>, u32>,
     stack_leaf: Vec<String>,
@@ -54,6 +55,7 @@ impl PerfectSamplerReceiver {
             path,
             next_ts: 0,
             synced: false,
+            gap_ticks: 0,
             samples: Vec::new(),
             stack_ids: HashMap::new(),
             stack_leaf: Vec::new(),
@@ -160,8 +162,20 @@ impl AbstractReceiver for PerfectSamplerReceiver {
                         self.next_ts += self.interval;
                     }
                 }
-                if let EventKind::SyncEnd { .. } = kind {
-                    self.synced = false;
+                match kind {
+                    // no samples inside a gap: the stack is unknown there
+                    EventKind::SyncEnd { .. } | EventKind::Pause { .. } => {
+                        self.synced = false;
+                    }
+                    EventKind::Resume { .. } => {
+                        // skip the ticks that fell in the gap, resume sampling after
+                        while self.next_ts < t {
+                            self.next_ts += self.interval;
+                            self.gap_ticks += 1;
+                        }
+                        self.synced = true;
+                    }
+                    _ => {}
                 }
                 self.unwinder.step(&entry);
             }
@@ -195,10 +209,11 @@ impl AbstractReceiver for PerfectSamplerReceiver {
             self.stack_folded.len()
         );
         println!(
-            "--------------------------------\nPerfect sampler: interval={} cycles, {} samples, {} unique stacks\n--------------------------------",
+            "--------------------------------\nPerfect sampler: interval={} cycles, {} samples, {} unique stacks, {} ticks skipped in gaps\n--------------------------------",
             self.interval,
             self.samples.len(),
-            self.stack_folded.len()
+            self.stack_folded.len(),
+            self.gap_ticks
         );
     }
 }

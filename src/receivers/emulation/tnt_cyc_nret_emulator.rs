@@ -48,13 +48,30 @@ impl AbstractEmulator for TNTCycNRETEmulator {
                         self.n_tnt += 1;
                         self.event_staging.push((timestamp, kind.clone()));
                     }
+                    EventKind::Resume { .. } => {
+                        // a gap re-establishes the time base, like a sync
+                        self.event_staging.clear();
+                        self.n_tnt = 0;
+                        self.curr_cyc = timestamp;
+                        self.emu_clock = timestamp;
+                        self.analyzer.push_emulated_event(EmulationResult {
+                            ref_ts: timestamp,
+                            emu_ts: timestamp,
+                            event: kind.clone(),
+                        });
+                        return;
+                    }
                     _ => {
                         self.event_staging.push((timestamp, kind.clone()));
                     }
                 }
 
                 // then, detect if we should release the events
-                if self.n_tnt >= self.lim_tnt || matches!(&kind, EventKind::UninferableJump { .. }) || matches!(&kind, EventKind::Trap { .. })
+                // (a Pause carries an exact cycle and ends the observable stream, so it flushes like a trap)
+                if self.n_tnt >= self.lim_tnt
+                    || matches!(&kind, EventKind::UninferableJump { .. })
+                    || matches!(&kind, EventKind::Trap { .. })
+                    || matches!(&kind, EventKind::Pause { .. })
                 {
                     // smear the timestamps distributing across all events staged, excluding the current event
                     let slack = timestamp - self.curr_cyc;
