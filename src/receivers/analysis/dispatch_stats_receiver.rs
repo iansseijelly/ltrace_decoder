@@ -1,5 +1,6 @@
 use crate::backend::event::{Entry, EventKind};
 use crate::receivers::abstract_receiver::{AbstractReceiver, BusReceiver, Shared};
+use crate::receivers::latency_hist::{LatencyHist, HIST_BINS};
 
 use bus::BusReader;
 use std::collections::{HashMap, HashSet};
@@ -20,8 +21,9 @@ pub struct DispatchStatsReceiver {
     seq_written: u64,
     receiver: BusReceiver,
     handlers: HashSet<u64>,
-    // (from_handler, to_handler) -> entry-block intervals
-    records: HashMap<(u64, u64), Vec<u64>>,
+    // (from_handler, to_handler) -> entry-block latency distribution
+    records: HashMap<(u64, u64), LatencyHist>,
+    hist_writer: Option<BufWriter<File>>,
     curr_handler: Option<u64>,
     // a handler entry whose entry-block interval is not yet complete:
     // (handler_addr, entry_timestamp, from_handler)
@@ -31,7 +33,7 @@ pub struct DispatchStatsReceiver {
 
 impl DispatchStatsReceiver {
     pub fn new(bus_rx: BusReader<Entry>, path: String, handlers: HashSet<u64>,
-               seq_path: Option<String>, seq_limit: u64) -> Self {
+               seq_path: Option<String>, seq_limit: u64, hist_path: Option<String>) -> Self {
         Self {
             writer: BufWriter::new(File::create(path).unwrap()),
             seq_writer: seq_path.map(|p| {
@@ -48,6 +50,7 @@ impl DispatchStatsReceiver {
             },
             handlers,
             records: HashMap::new(),
+            hist_writer: hist_path.map(|p| BufWriter::new(File::create(p).unwrap())),
             curr_handler: None,
             pending: None,
             prev_addr: 0,
@@ -69,7 +72,7 @@ impl DispatchStatsReceiver {
                 self.records
                     .entry((f, handler))
                     .or_default()
-                    .push(timestamp.saturating_sub(entry_ts));
+                    .add(timestamp.saturating_sub(entry_ts));
             }
             self.curr_handler = Some(handler);
         }
@@ -99,6 +102,7 @@ pub fn factory(
         .to_string();
     let seq_path = config.get("seq_path").and_then(|v| v.as_str()).map(|s| s.to_string());
     let seq_limit = config.get("seq_limit").and_then(|v| v.as_u64()).unwrap_or(0);
+    let hist_path = config.get("hist_path").and_then(|v| v.as_str()).map(|s| s.to_string());
     let handlers: HashSet<u64> = config
         .get("handlers")
         .and_then(|value| value.as_array())
@@ -109,7 +113,7 @@ pub fn factory(
             u64::from_str_radix(s.trim_start_matches("0x"), 16).expect("bad handler address")
         })
         .collect();
-    Box::new(DispatchStatsReceiver::new(bus_rx, path, handlers, seq_path, seq_limit))
+    Box::new(DispatchStatsReceiver::new(bus_rx, path, handlers, seq_path, seq_limit, hist_path))
 }
 
 crate::register_receiver!("dispatch_stats", factory);
@@ -153,6 +157,12 @@ impl AbstractReceiver for DispatchStatsReceiver {
             } => {
                 self.reset_flow(arc.1);
             }
+            Entry::Event {
+                timestamp: _,
+                kind: EventKind::Resume { pc, .. },
+            } => {
+                self.reset_flow(pc);
+            }
             _ => {}
         }
     }
@@ -164,30 +174,48 @@ impl AbstractReceiver for DispatchStatsReceiver {
         self.writer
             .write_all(b"count,mean,min,p50,p90,p99,max,netvar,from_handler,to_handler\n")
             .unwrap();
-        for ((from, to), intervals) in self.records.iter_mut() {
-            if intervals.is_empty() {
+        if let Some(ref mut w) = self.hist_writer {
+            w.write_all(b"from_handler,to_handler,cycles,count\n").unwrap();
+        }
+        for ((from, to), d) in self.records.iter() {
+            if d.n == 0 {
                 continue;
             }
-            let sum: u64 = intervals.iter().sum();
-            let count = intervals.len();
-            let mean = sum as f64 / count as f64;
-            intervals.sort_unstable();
-            let min = intervals[0];
-            let pct = |p: f64| -> u64 {
-                let idx = (((count as f64 - 1.0) * p).round() as usize).min(count - 1);
-                intervals[idx]
-            };
-            let netvar = sum - min * count as u64;
+            let count = d.n;
+            let mean = d.sum as f64 / count as f64;
+            let min = d.min();
+            // min() falls back to max when every sample overflowed the bins
+            let netvar = d.sum.saturating_sub(min * count);
             self.writer
                 .write_all(
                     format!(
                         "{}, {}, {}, {}, {}, {}, {}, {}, {:#x}, {:#x}\n",
-                        count, mean, min, pct(0.50), pct(0.90), pct(0.99),
-                        intervals[count - 1], netvar, from, to,
+                        count, mean, min, d.quantile(0.50), d.quantile(0.90),
+                        d.quantile(0.99), d.max, netvar, from, to,
                     )
                     .as_bytes(),
                 )
                 .unwrap();
+            if let Some(ref mut w) = self.hist_writer {
+                for (c, &k) in d.hist.iter().enumerate() {
+                    if k > 0 {
+                        w.write_all(format!("{:#x},{:#x},{},{}\n", from, to, c, k).as_bytes())
+                            .unwrap();
+                    }
+                }
+                if d.over_n > 0 {
+                    // everything at or past the last bin lands in one row (cycles ==
+                    // HIST_BINS) so the column stays numeric and counts still sum to n
+                    w.write_all(
+                        format!("{:#x},{:#x},{},{}\n", from, to, HIST_BINS, d.over_n)
+                            .as_bytes(),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+        if let Some(ref mut w) = self.hist_writer {
+            w.flush().unwrap();
         }
         self.writer.flush().unwrap();
     }

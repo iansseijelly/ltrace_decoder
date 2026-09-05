@@ -27,3 +27,6 @@ bundles/
 # lua_ncj_nbody_seq.json is hand-maintained, not generated.
 configs/lua/lua_ncj_*.json
 !configs/lua/lua_ncj_nbody_seq.json
+
+# python bytecode from the analysis scripts
+__pycache__/
