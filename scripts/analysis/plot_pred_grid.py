@@ -20,10 +20,11 @@ single-arm plotter got wrong:
       LTI renormalises 20% -> 33%. Against a fixed denominator the guarded traffic
       instead reads as missing area, which is the result.
 
-A guarded arrival does not stop happening -- it lands on the `mv s7,s4` pc-update
-stub two bytes before the handler's disptab entry, which is not one of the 83
-addresses dispatch_stats keys on, so the tool cannot see it. Removed predecessors
-therefore keep a greyed legend entry rather than vanishing.
+A guarded arrival lands on the compiler's edge stub in front of the handler's disptab
+entry and falls through into it; dispatch_stats canonicalises such arrivals to the
+entry they flow into, so a guarded predecessor stays in its row and its bar moves
+from the mispredict mode to the floor. A predecessor that is genuinely absent from a
+later arm (e.g. a control binary) keeps its legend entry so rows stay comparable.
 
   plot_pred_grid.py --targets MUL,ADD --out fig.pred_grid \
       "baseline=base.dispatch_hist.csv:configs/lua/lua_optab_fusebase.json" \
@@ -60,13 +61,18 @@ def load_arm(spec):
 
 
 def contexts(d, tab, target_addr):
-    """-> (total instances, {predecessor opcode: (cycles, counts)})."""
+    """-> (total instances, {predecessor opcode: (cycles, counts)}).
+
+    Aggregated BY OPCODE: if two addresses resolve to the same handler name they add
+    up rather than the second silently replacing the first."""
     s = d[d.to_handler == target_addr]
-    out = {}
+    acc = {}
     for f, g in s.groupby('from_handler'):
-        g = g.sort_values('cycles')
-        out[tab.get(f, hex(f))] = (g['cycles'].to_numpy(float),
-                                   g['count'].to_numpy(float))
+        name = tab.get(f, hex(f))
+        h = g.groupby('cycles')['count'].sum()
+        acc[name] = acc[name].add(h, fill_value=0) if name in acc else h
+    out = {name: (h.sort_index().index.to_numpy(float), h.sort_index().to_numpy(float))
+           for name, h in acc.items()}
     return int(s['count'].sum()), out
 
 
@@ -202,19 +208,11 @@ def main():
             ax.text(-0.03, 1.10, 'abcdefghi'[r * nc + c], transform=ax.transAxes,
                     fontsize=st['panel'], fontweight='bold', va='top', ha='left')
 
-        # one legend per row, since the colour key is per row. A predecessor in the
-        # key but absent from the LAST arm was guarded away, so say so.
-        last = grid[(tgt, arms[-1][0])][1]
+        # one legend per row, since the colour key is per row
         h = []
         for pred, col in key.items():
-            # The swatch always carries the predecessor's own colour, because the
-            # earlier panels still draw it that way; only the LABEL records that it
-            # was peeled by a guard in the final arm.
-            gone = pred not in last
-            # h.append(Patch(facecolor=col, edgecolor='white', linewidth=0.3,
-            #                label=f'after {pred}' + (' — guarded' if gone else '')))
             h.append(Patch(facecolor=col, edgecolor='white', linewidth=0.3,
-                           label=f'after {pred}')) 
+                           label=f'after {pred}'))
         if any(p not in key for arm in arms for p in grid[(tgt, arm[0])][1]):
             h.append(Patch(facecolor=NEUTRAL, edgecolor='white', linewidth=0.3,
                            label='other'))
@@ -239,7 +237,7 @@ def main():
                     cyc, w = ctx[pred]
                     cells.append(f'{w.sum()/1e6:6.1f}M @{(cyc*w).sum()/w.sum():5.2f}')
                 else:
-                    cells.append(f'{"guarded away":>16}')
+                    cells.append(f'{"absent":>16}')
             print(f'  {pred:>12} ' + ' '.join(f'{c:>16}' for c in cells))
     print(f'\nwrote {a.out}.pdf and {a.out}.png — {nr}x{nc} panels, '
           f'{got_w:.1f}x{got_h:.1f} mm, {st["base"]:.0f} pt ({a.venue})')

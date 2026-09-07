@@ -147,17 +147,24 @@ def main():
                 raise SystemExit(f'{t!r} is not a handler name in {a.optab}')
             targets.append((addr, optab.get(addr, t)))
 
-    vbb_ref, rank_ref = {}, {}
-    if bb is not None:
-        order = bb.sort_values('vbb', ascending=False).reset_index(drop=True)
-        for addr, _ in targets:
-            m = order[order['addr'] == addr]
-            if not m.empty:
-                vbb_ref[addr] = float(m.iloc[0]['vbb'])
-                rank_ref[addr] = int(m.index[0]) + 1
-
     panels = [(addr, name) + contexts(hist, addr, a.min_share, a.max_hues)
               for addr, name in targets]
+
+    # Cross-check against bb_stats. A handler's arrivals live in every block that STARTS at
+    # its entry or FALLS THROUGH into it (a guard's edge stub in front of the entry), so sum
+    # over those blocks, and use the panel's global p5 so both sides measure the same thing:
+    # sum_blocks n_b * (mean_b - p5_global).
+    vbb_ref, rank_ref, nblk_ref = {}, {}, {}
+    if bb is not None:
+        bb['end'] = bb['bb'].str.split('-').str[1].map(
+            lambda h: -1 if h.startswith('0xffffffff') else int(h, 16))
+        order = bb.sort_values('vbb', ascending=False).reset_index(drop=True)
+        for addr, name, p5g, *_ in panels:
+            m = order[(order['addr'] == addr) | ((order['addr'] < addr) & (addr <= order['end']))]
+            if not m.empty:
+                vbb_ref[addr] = float((m['count'] * (m['mean'] - p5g)).sum())
+                nblk_ref[addr] = len(m)
+                rank_ref[addr] = int(m.index.min()) + 1
 
     # One x range for every panel: the claim is that the contexts sit at different
     # latencies, which is only legible if the axes are directly comparable.
@@ -260,7 +267,8 @@ def main():
                          f"{c['n'] * (c['mean'] - p5g) / 1e6:11.1f}M")
         lines.append(f'  excess over the global p5 floor, summed: '
                      f'{vbb_total / 1e6:.1f} Mcyc' +
-                     (f'   (bb_stats vbb {vbb_ref[addr] / 1e6:.1f} Mcyc)'
+                     (f'   (bb_stats, same floor, over {nblk_ref[addr]} block'
+                      f'{"s" if nblk_ref[addr] != 1 else ""}: {vbb_ref[addr] / 1e6:.1f} Mcyc)'
                       if addr in vbb_ref else ''))
     if clipped_note:
         lines += ['', 'x range clipped: ' + '; '.join(clipped_note)]

@@ -62,3 +62,5 @@ pub mod bb_pair_stats_receiver;
 
 #[path = "analysis/dispatch_stats_receiver.rs"]
 pub mod dispatch_stats_receiver;
+#[path = "analysis/bb_seq_receiver.rs"]
+pub mod bb_seq_receiver;

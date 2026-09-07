@@ -31,10 +31,16 @@ $PY $S/lua_pair_latency_report.py --optab "$OPTAB" \
     --stats "$PREFIX.dispatch_stats.csv" --window "$WINDOW" \
     --out "$OUT/pairs.mandelbrot"
 
-$PY $S/plot_bb_distributions.py --bb-stats "$PREFIX.bb_stats.csv" \
-    --bb-hist "$PREFIX.bb_hist.csv" --optab "$OPTAB" \
-    --top 5 --cols 3 --min-range 3 --percentiles 50,90,99 \
-    -o "$OUT/fig.bb_distributions.pdf"
+# the per-block histogram needs bb_stats' hist_path; a decode without it still has
+# everything else, so skip the figure rather than the flow
+if [ -f "$PREFIX.bb_hist.csv" ]; then
+  $PY $S/plot_bb_distributions.py --bb-stats "$PREFIX.bb_stats.csv" \
+      --bb-hist "$PREFIX.bb_hist.csv" --optab "$OPTAB" \
+      --top 5 --cols 3 --min-range 3 --percentiles 50,90,99 \
+      -o "$OUT/fig.bb_distributions.pdf"
+else
+  echo "  (no bb_hist.csv -- skipping fig.bb_distributions; add hist_path to bb_stats to get it)"
+fi
 
 $PY $S/plot_pred_distributions.py --hist "$PREFIX.dispatch_hist.csv" \
     --optab "$OPTAB" --targets top:2 --bb-stats "$PREFIX.bb_stats.csv" \
