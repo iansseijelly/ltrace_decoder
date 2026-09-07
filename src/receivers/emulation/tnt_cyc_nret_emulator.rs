@@ -1,5 +1,5 @@
 use crate::backend::event::{Entry, EventKind};
-use crate::receivers::emulation::abstract_emulator::{AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
+use crate::receivers::emulation::abstract_emulator::{share, AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
 
 // Emulates a TNT based encoder, emitting CYC packets
 // It never compresses RET packets ever
@@ -76,30 +76,19 @@ impl AbstractEmulator for TNTCycNRETEmulator {
                     // smear the timestamps distributing across all events staged, excluding the current event
                     let slack = timestamp - self.curr_cyc;
                     let num_events = self.event_staging.len() as u64;
-                    let delta_cyc = slack / num_events;
 
                     if num_events > 0 {
-                        // the last events gets the remainder as well
-                        let (last_event_timestamp, last_event) = self.event_staging.pop().unwrap();
-
-                        for (event_timestamp, event) in self.event_staging.iter() {
-                            self.emu_clock += delta_cyc;
+                        // cumulative rounding: shares sum to `slack`, none is more than one
+                        // cycle from the even split (see `share`)
+                        let staged = std::mem::take(&mut self.event_staging);
+                        for (j, (event_timestamp, event)) in staged.into_iter().enumerate() {
+                            self.emu_clock += share(slack, num_events, j as u64);
                             self.analyzer.push_emulated_event(EmulationResult {
-                                ref_ts: *event_timestamp,
+                                ref_ts: event_timestamp,
                                 emu_ts: self.emu_clock,
-                                event: event.clone(),
+                                event,
                             });
                         }
-
-                        // write the last event
-                        self.emu_clock += delta_cyc + slack % num_events;
-                        self.analyzer.push_emulated_event(EmulationResult {
-                            ref_ts: last_event_timestamp,
-                            emu_ts: self.emu_clock,
-                            event: last_event.clone(),
-                        });
-                        // clear the states
-                        self.event_staging.clear();
                         self.n_tnt = 0;
                     }
 

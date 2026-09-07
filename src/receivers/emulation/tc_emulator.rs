@@ -1,5 +1,5 @@
 use crate::backend::event::{Entry, EventKind};
-use crate::receivers::emulation::abstract_emulator::{AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
+use crate::receivers::emulation::abstract_emulator::{share, AbstractEmulatedAnalyzer, AbstractEmulator, EmulationResult};
 
 pub struct TCEmulator {
     event_staging: Vec<(u64, EventKind)>,
@@ -78,27 +78,18 @@ impl TCEmulator {
         if num_events == 0 {
             return;
         }
-        let delta_tc = slack / num_events;
-
-        // the last event gets the remainder as well
-        let (last_event_timestamp, last_event) = self.event_staging.pop().unwrap();
-
-        for (event_timestamp, event) in self.event_staging.iter() {
-            self.emu_clock += delta_tc;
+        // cumulative rounding: shares sum to `slack`, none is more than one cycle from the
+        // even split (see `share`)
+        let staged = std::mem::take(&mut self.event_staging);
+        let last_event_timestamp = staged.last().map(|(t, _)| *t).unwrap_or(self.curr_timestamp);
+        for (j, (event_timestamp, event)) in staged.into_iter().enumerate() {
+            self.emu_clock += share(slack, num_events, j as u64);
             self.analyzer.push_emulated_event(EmulationResult {
-                ref_ts: *event_timestamp,
+                ref_ts: event_timestamp,
                 emu_ts: self.emu_clock,
-                event: event.clone(),
+                event,
             });
         }
-
-        self.emu_clock += delta_tc + slack % num_events;
-        self.analyzer.push_emulated_event(EmulationResult {
-            ref_ts: last_event_timestamp,
-            emu_ts: self.emu_clock,
-            event: last_event,
-        });
         self.curr_timestamp = last_event_timestamp;
-        self.event_staging.clear();
     }
 }
