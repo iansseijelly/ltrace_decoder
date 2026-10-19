@@ -84,8 +84,8 @@ Trap type (`func3` when `f_header == Trap`): `001` exception, `010` interrupt,
 `100` trap return (`sret`/`mret`). `000` and other values are invalid.
 
 Sync type (`func3` when `f_header == Sync`): `001` Start, `010` Periodic
-(defined, never emitted), `011` End, `100` Pause, `101` Resume (§9). `000`,
-`110`, `111` are invalid; the decoder rejects them.
+(§9.9), `011` End, `100` Pause, `101` Resume (§9). `000`, `110`, `111` are
+invalid; the decoder rejects them.
 
 If `c_header != CNA`, the byte is a **compressed packet** and bits `[7:2]` are
 not a header at all but a 6-bit timestamp delta (§4.1).
@@ -171,8 +171,9 @@ header(CNA, f=Sync, func3=type) | prv | ctx: varint | trap_addr: varint | target
   `runtime_cfg`, emitted through the varint encoder so it is always exactly one
   byte `0x80 | cfg`: `cfg[1:0] = bp_mode`, `cfg[6:2] = log2(bp_entries / 64)`
   (so `bp_entries = 64 << cfg[6:2]`). For **End** and **Pause** it is `0`
-  (byte `0x80`). For **Resume** it is the dropped-packet count (§9.4). The
-  decoder reads it as a varint for every sync type.
+  (byte `0x80`). For **Resume** it is the dropped-packet count (§9.4). For
+  **Periodic** it is `PERIODIC_MAGIC << 16 | seq` (§9.9). The decoder reads it
+  as a varint for every sync type.
 * `target_addr = sync_pc >> 1`, **absolute**, encoded at full `iaddrWidth`
   (a sign-extended kernel VA costs up to 10 varint bytes).
 * `time`: **absolute** cycle count.
@@ -286,8 +287,9 @@ implements only `BrTarget`.
    XOR-against-previous-PC encoding would save most of that.
 6. There is no stream magic/version byte. Start's `cfg` is the only
    configuration carried in-band.
-7. `SyncPeriodic` is defined on both sides but never emitted; the decoder
-   rejects it as an error (v1.1; it used to be treated as End).
+7. `SyncPeriodic` is emitted by `TacitParallelEncoder` when the controller's
+   `sync_interval` register is non-zero (§9.9); the serial `TacitEncoder` never
+   emits it.
 8. `f_header = 110` ("value") and `111` are reserved on the RTL side; the
    decoder returns a decode error for them (v1.1; it used to panic).
 
@@ -314,7 +316,7 @@ encoder not yet implemented.
 | `func3` | Name | Header byte | Binds to | `trap_addr` | Decoder action on `target_addr` |
 |---|---|---|---|---|---|
 | `001` | Start | `0x36` | next retire group | `runtime_cfg` (1 byte) | set PC |
-| `010` | Periodic (reserved) | `0x56` | — | — | error |
+| `010` | **Periodic** | `0x56` | a retire group with no events | `PERIODIC_MAGIC << 16 \| seq` | walk to PC, verify exact landing; checkpoint (§9.9) |
 | `011` | End | `0x76` | next retire group | `0` (`0x80`) | walk to PC and verify; session terminal |
 | `100` | **Pause** | `0x96` | the first *lost* message | `0` (`0x80`) | walk to PC, verify exact landing; enter gap |
 | `101` | **Resume** | `0xB6` | next retire group | `dropped` (varint) | set PC; leave gap |
@@ -494,8 +496,52 @@ field unconditional and keeps the grammar free of a `Pause End` production.
   used; would need a new field or a widened Resume. Not in v1.1.
 * **Pause `trap_addr`.** Reserved (`0`). A pause-reason code is the obvious
   future use.
-* **Periodic.** The Pause/Resume machinery makes lossless periodic resync
-  (seekable traces) cheap to add; not in v1.1.
+* **Periodic.** Implemented in v1.2, see §9.9.
+
+### 9.9 Periodic checkpoints (v1.2)
+
+Purpose: decode a trace whose beginning is gone, e.g. a DMA sink in ring-buffer
+mode that wrapped, so the oldest byte in the buffer is in the middle of a packet.
+
+**Encoder.** The controller's `sync_interval` register (offset `0x60`, bytes;
+`0` = off, the reset value; write before enable) arms a checkpoint once that many
+trace bytes have left the encoder since the last one (or since Start). The
+checkpoint is inserted at the next retire group that carries **no** control-flow
+message, in that group's own slot: every older group has already been enqueued,
+the group itself has no events, so nothing is dropped or reordered, and the
+encoder stays in its data state. Periodic is never emitted inside a lossy gap.
+The sequence number restarts at 0 with every Start.
+
+```
+header 0x56 | prv | ctx | trap_addr = PERIODIC_MAGIC << 16 | seq | target_addr | time
+PERIODIC_MAGIC = 0xA5C396E (28 bits), seq = 16-bit checkpoint counter
+```
+
+`target_addr` is the oldest instruction of the bound group, `time` its absolute
+retire cycle; `prv`/`ctx` are the group's.
+
+**Linear decoding.** Like End, but the session continues: walk from the current
+PC to the checkpoint PC, which must land exactly (the group has no events, so the
+walk is straight-line); time, prv and ctx are re-seeded from the packet; a `seq`
+that is not the previous one plus one is reported as lost checkpoints.
+
+**Resync** (`resync_periodic: true` in the decoder config). The stream has no
+escaping, so any byte value, including `0x56`, can occur inside other packets. The
+decoder accepts the first offset where all of these hold, then rewrites the
+stream to start there with an equivalent Start and decodes normally:
+
+1. the byte is `0x56`;
+2. the prv byte has the `0b10` check pattern, `from_priv = 0` and a valid `to_priv`;
+3. ctx, trap_addr, target_addr and time are well-formed varints;
+4. trap_addr's upper bits equal `PERIODIC_MAGIC`;
+5. every later packet parses up to the next Periodic, whose `seq` is one higher,
+   or to a clean end of stream.
+
+Checks 1-4 leave roughly a 2^-40 false-positive rate per byte position; check 5
+and the exact-landing walks of the normal decoder make accepting a bogus
+checkpoint effectively impossible. Everything before the first checkpoint in the
+buffer is lost; with a ring of `B` bytes and `sync_interval = N`, at most about
+`N` bytes plus one retire group's wait are.
 
 ## 10. Worked examples
 

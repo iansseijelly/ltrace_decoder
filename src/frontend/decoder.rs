@@ -15,7 +15,7 @@ use crate::frontend::decoder_cache::{BasicBlockStats, DecoderCache};
 use crate::frontend::f_header::FHeader;
 use crate::frontend::packet::{read_first_packet, runtime_cfg_from_start, Packet, PacketReader};
 use crate::frontend::runtime_cfg::DecoderRuntimeCfg;
-use crate::frontend::sync_type::SyncType;
+use crate::frontend::sync_type::{SyncType, PERIODIC_MAGIC};
 use crate::frontend::trap_type::TrapType;
 
 use rustc_data_structures::fx::FxHashMap;
@@ -281,9 +281,14 @@ pub fn decode_trace(
     let mut timestamp = first_packet.timestamp;
     let mut prv = first_packet.target_prv;
     let mut ctx = first_packet.target_ctx;
-    let mut u_unknown_ctx = false;
+    // U-mode code can only be walked if a user binary is configured for its ASID; the
+    // same rule as a trap return into U-mode (with no user binaries, U-mode packets
+    // are consumed for timing only).
+    let u_unknown = |prv: Prv, ctx: u64| prv == Prv::PrvUser && !find_ctx(ctx, &valid_ctxs);
+    let mut u_unknown_ctx = u_unknown(prv, ctx);
     let mut stream_state = StreamState::Body;
     let mut session_start_ts = first_packet.timestamp;
+    let mut last_periodic_seq: Option<u64> = None;
     let mut stats = LossyStats::default();
     stats.sessions = 1;
 
@@ -402,10 +407,7 @@ pub fn decode_trace(
                     timestamp = packet.timestamp;
                     prv = packet.target_prv;
                     ctx = packet.target_ctx;
-                    // same policy as Start: with no ASID list every ctx is "known"
-                    u_unknown_ctx = prv == Prv::PrvUser
-                        && !valid_ctxs.is_empty()
-                        && !find_ctx(ctx, &valid_ctxs);
+                    u_unknown_ctx = u_unknown(prv, ctx);
                     decoder_cache.reset();
                     // the hardware predictor is reset on Resume; mirror it
                     bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
@@ -465,7 +467,7 @@ pub fn decode_trace(
                     timestamp = packet.timestamp;
                     prv = packet.target_prv;
                     ctx = packet.target_ctx;
-                    u_unknown_ctx = false;
+                    u_unknown_ctx = u_unknown(prv, ctx);
                     decoder_cache.reset();
                     bp_counter = BpDoubleSaturatingCounter::new(runtime_cfg.bp_entries);
                     session_start_ts = timestamp;
@@ -477,7 +479,55 @@ pub fn decode_trace(
                     stream_state = StreamState::Body;
                     continue;
                 }
-                SyncType::SyncPeriodic | SyncType::SyncNone => {
+                SyncType::SyncPeriodic => {
+                    // Checkpoint: binds to a retire group with no events, so the walk
+                    // from the last event to it is straight-line and must land exactly.
+                    let StreamState::Body = stream_state else {
+                        bail!("Periodic at {} while {:?}", packet.timestamp, stream_state);
+                    };
+                    if packet.from_address >> 16 != PERIODIC_MAGIC {
+                        bail!("Periodic at {}: trap_addr {:#x} does not carry the periodic magic",
+                              packet.timestamp, packet.from_address);
+                    }
+                    let seq = packet.from_address & 0xffff;
+                    if let Some(prev) = last_periodic_seq {
+                        if seq != (prev + 1) & 0xffff {
+                            warn!("Periodic: sequence {} follows {}; checkpoints were lost", seq, prev);
+                        }
+                    }
+                    last_periodic_seq = Some(seq);
+                    let sync_pc = refund_addr(packet.target_address);
+                    if can_walk {
+                        let new_pc = step_bb_until(
+                            pc.get_addr(),
+                            curr_insn_map,
+                            sync_pc,
+                            &mut bus,
+                            &mut insn_count,
+                            prv,
+                            ctx,
+                        );
+                        if new_pc != sync_pc {
+                            bail!("Periodic: walked to {:#x}, checkpoint says {:#x}", new_pc, sync_pc);
+                        }
+                    }
+                    pc.set_addr(sync_pc);
+                    if packet.timestamp < timestamp {
+                        bail!("Periodic: absolute time {} is before the accumulated time {}", packet.timestamp, timestamp);
+                    }
+                    timestamp = packet.timestamp;
+                    // a checkpoint binds to a group in the current context
+                    if packet.target_prv != prv || (prv == Prv::PrvUser && packet.target_ctx != ctx) {
+                        warn!("Periodic at {}: checkpoint says ({:?}, ctx {}), decoder was in ({:?}, ctx {})",
+                              packet.timestamp, packet.target_prv, packet.target_ctx, prv, ctx);
+                    }
+                    prv = packet.target_prv;
+                    ctx = packet.target_ctx;
+                    u_unknown_ctx = u_unknown(prv, ctx);
+                    bus.broadcast(Entry::event(EventKind::SyncPeriodic, timestamp));
+                    continue;
+                }
+                SyncType::SyncNone => {
                     bail!("unsupported sync type {:?} at {}", sync_type, packet.timestamp);
                 }
             }

@@ -1,5 +1,10 @@
 pub const SYNC_TYPE_MASK: u8 = 0b1110_0000;
 pub const SYNC_TYPE_OFFSET: u8 = 5;
+/// Upper 28 bits of a Sync Periodic's trap_addr field (below them, a 16-bit
+/// sequence number); fixed by the packet format (`docs/packet-format.md`).
+pub const PERIODIC_MAGIC: u64 = 0xA5C396E;
+/// Header byte of a Sync Periodic packet (c=CNA, f=Sync, func3=Periodic).
+pub const PERIODIC_HEADER: u8 = 0x56;
 
 /// Sync subtypes (func3 of a Sync header byte).
 ///

@@ -18,6 +18,7 @@ mod frontend {
     pub mod decoder_cache;
     pub mod f_header;
     pub mod packet;
+    pub mod resync;
     pub mod runtime_cfg;
     pub mod sync_type;
     pub mod trap_type;
@@ -82,7 +83,7 @@ fn main() -> Result<()> {
     let args = Args::parse();
 
     // If a config file is supplied, use it for receiver toggles (CLI still supplies paths).
-    let static_cfg = if let Some(path) = &args.config {
+    let mut static_cfg = if let Some(path) = &args.config {
         load_file_config(path)?
     } else {
         DecoderStaticCfg::default()
@@ -125,6 +126,13 @@ fn main() -> Result<()> {
             "Encoded trace file is not valid: {}",
             static_cfg.encoded_trace
         ));
+    }
+
+    // A trace whose start was lost (DMA ring buffer that wrapped): decode from its
+    // first Sync Periodic checkpoint instead of requiring a Start.
+    if static_cfg.resync_periodic {
+        static_cfg.encoded_trace =
+            frontend::resync::rewrite_trimmed_trace_from_first_periodic(&static_cfg.encoded_trace)?;
     }
 
     let (first_packet, runtime_cfg) = {

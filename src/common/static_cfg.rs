@@ -15,6 +15,9 @@ pub struct DecoderStaticCfg {
     // list of emulation pipelines: each spec bundles an emulated trace format
     // with its error analyzers and chained receivers (see emulation_pipeline.rs)
     pub emulations: Vec<serde_json::Value>,
+    // the trace may start mid-stream (a wrapped DMA ring buffer): start decoding at
+    // its first valid Sync Periodic checkpoint (see frontend/resync.rs)
+    pub resync_periodic: bool,
 }
 
 pub fn load_file_config(path: &str) -> Result<DecoderStaticCfg> {
